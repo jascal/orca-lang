@@ -31,3 +31,7 @@ coverage/
 
 # Generated output
 actions/
+
+# Local config
+orca.yaml
+orca.yaml.example
