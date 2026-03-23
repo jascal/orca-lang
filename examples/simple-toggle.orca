@@ -1,0 +1,34 @@
+machine SimpleToggle
+
+context {
+  count: int = 0
+}
+
+events {
+  toggle
+  reset
+}
+
+state off [initial] {
+  description: "Toggle is off"
+}
+
+state on {
+  description: "Toggle is on"
+}
+
+guards {
+  can_toggle: true
+}
+
+transitions {
+  off + toggle -> on : increment_count
+  on  + toggle -> off : increment_count
+  off + reset -> off : reset_count
+  on  + reset -> off : reset_count
+}
+
+actions {
+  increment_count: (ctx: Context) -> Context
+  reset_count:      (ctx: Context) -> Context
+}
