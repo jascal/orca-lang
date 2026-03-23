@@ -596,7 +596,10 @@ state <name> [initial] [final] {
 guards {
   guard_name: ctx.field > 10
   another_guard: ctx.status == "active"
+  has_item: ctx.inventory.length > 0
 }
+
+NOTE: Guards support ONLY: comparisons (< > == != <= >=), null checks (== null, != null), boolean operators (and, or, not). NO method calls like .contains(), .includes(), etc.
 
 transitions {
   state1 + event1           -> state2          : action1
@@ -610,15 +613,24 @@ actions {
   action3: (ctx: Context) -> Context + Effect<EffectType>
 }
 
+Action implementations (in transitions, use _ for no action):
+  state + event -> target : action_name
+
+Action signatures declare types only. Context updates use spread syntax:
+  return { ...ctx, field: newValue }
+  return [ctx, { type: 'EffectType', payload: {} }]  // for effects
+
 Key syntax notes:
 - [initial] marks the initial state (exactly one required)
 - [final] marks terminal states (zero or more allowed)
-- _ as action means "no action"
+- _ as action means "no action" (transition only changes state)
 - [guard] where guard is a name from the guards block
 - [!guard] negates the guard
 - Effect<T> in return type means the action emits an effect
-- ctx.field accesses context fields
-- timeout: 5s -> target means 5 second timeout transition`;
+- ctx.field accesses context fields (read-only in guards)
+- timeout: 5s -> target means 5 second timeout transition
+- Action BODIES are NOT written in Orca - only signatures in the actions block
+- Transitions reference actions by name; actions are implemented separately`;
 
 export async function generateOrcaSkill(
   naturalLanguageSpec: string,
@@ -647,13 +659,25 @@ export async function generateOrcaSkill(
 
 ${ORCA_SYNTAX_REFERENCE}
 
+IMPORTANT - Guard Restrictions:
+- Guards support ONLY: comparisons (< > == != <= >=), null checks, boolean operators
+- NO method calls: do NOT use .contains(), .includes(), .length(), etc.
+- For arrays, check .length > 0 or compare to null
+- If you need complex logic, compute it in an action and store a boolean flag in context
+
+IMPORTANT - Action Syntax:
+- The actions block declares ONLY SIGNATURES (names and types), not implementations
+- Write: action_name: (ctx: Context) -> Context
+- NEVER write action bodies like: action_name: (ctx: Context) -> Context { return ... }
+- Transitions reference actions by name only
+
 Important rules:
 - Always include exactly ONE initial state marked with [initial]
 - Final states should be marked with [final]
 - Every (state, event) pair must have a transition OR the event must be ignored
 - Use guards for conditional transitions
 - Context should contain all data needed for guards and actions
-- For effects (API calls, I/O), use Effect<T> return type
+- For effects (API calls, I/O), use Effect<T> return type in the signature
 
 Output ONLY the Orca machine definition, wrapped in a code fence, with no additional text.`;
 
