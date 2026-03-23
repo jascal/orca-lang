@@ -23,7 +23,7 @@ import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
 import { compileToXState } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
-import { verifySkill, compileSkill, generateActionsSkill, refineSkill } from './skills.js';
+import { verifySkill, compileSkill, generateActionsSkill, refineSkill, generateOrcaSkill } from './skills.js';
 
 async function login(provider: string, profileId: string = 'default'): Promise<void> {
   console.log(`Logging in to ${provider}...`);
@@ -211,8 +211,8 @@ async function visualize(filePath: string): Promise<void> {
   console.log('\nYou can render this at: https://mermaid.live');
 }
 
-async function generateActions(filePath: string, language: string, json: boolean = false, useLLM: boolean = false, outputPath?: string): Promise<void> {
-  const result = await generateActionsSkill(filePath, language, useLLM);
+async function generateActions(filePath: string, language: string, json: boolean = false, useLLM: boolean = false, outputPath?: string, generateTests: boolean = false): Promise<void> {
+  const result = await generateActionsSkill(filePath, language, useLLM, undefined, generateTests);
 
   if (outputPath) {
     // Write scaffolds to output directory or file
@@ -227,6 +227,15 @@ async function generateActions(filePath: string, language: string, json: boolean
         writeFileSync(join(outputPath, fileName), code);
         console.log(`Wrote: ${join(outputPath, fileName)}`);
       }
+      // Write tests alongside action files
+      if (result.tests) {
+        for (const [name, test] of Object.entries(result.tests)) {
+          const fileName = `${name}.test.ts`;
+          const code = stripCodeFence(test);
+          writeFileSync(join(outputPath, fileName), code);
+          console.log(`Wrote: ${join(outputPath, fileName)}`);
+        }
+      }
     } else {
       // Combine all scaffolds into single file
       const combined = Object.entries(result.scaffolds)
@@ -234,6 +243,16 @@ async function generateActions(filePath: string, language: string, json: boolean
         .join('\n\n');
       writeFileSync(outputPath, combined);
       console.log(`Wrote: ${outputPath}`);
+
+      // Write tests to a separate file
+      if (result.tests) {
+        const testPath = outputPath.replace('.ts', '.test.ts');
+        const testCombined = Object.entries(result.tests)
+          .map(([name, test]) => `// Tests for ${name}\n${stripCodeFence(test)}`)
+          .join('\n\n');
+        writeFileSync(testPath, testCombined);
+        console.log(`Wrote: ${testPath}`);
+      }
     }
     return;
   }
@@ -247,6 +266,10 @@ async function generateActions(filePath: string, language: string, json: boolean
   for (const [name, scaffold] of Object.entries(result.scaffolds)) {
     console.log(`\n--- ${name} ---`);
     console.log(scaffold);
+    if (result.tests?.[name]) {
+      console.log(`\n--- ${name} Tests ---`);
+      console.log(result.tests[name]);
+    }
   }
 }
 
@@ -276,7 +299,7 @@ async function main(): Promise<void> {
     console.log('  orca compile [--json] xstate <file.orca>      - Compile to XState v5');
     console.log('  orca compile [--json] mermaid <file.orca>     - Compile to Mermaid diagram');
     console.log('  orca visualize <file.orca>                   - Compile and show Mermaid');
-    console.log('  orca actions [--json] [--lang <lang>] <file.orca>  - Generate action scaffolds');
+    console.log('  orca actions [--json] [--lang <lang>] [--output <path>] [--tests] <file.orca>  - Generate action scaffolds');
     console.log('');
     console.log('Auth commands:');
     console.log('  orca login [--provider <provider>] [--profile <id>]  - Login to an LLM provider');
@@ -285,8 +308,9 @@ async function main(): Promise<void> {
     console.log('');
     console.log('Skills (LLM-friendly):');
     console.log('  orca /verify-orca <file.orca>    - Structured JSON verification');
-    console.log('  orca /compile-orca <file.orca>   - Structured JSON compilation');
-    console.log('  orca /generate-actions [--use-llm] [--lang <lang>] [--output <path>] <file.orca>  - Generate action scaffolds');
+    console.log('  orca /compile-orca [target] <file.orca>   - Structured JSON compilation');
+    console.log('  orca /generate-orca "spec" [--output=<file.orca>]  - Generate Orca from natural language');
+    console.log('  orca /generate-actions [--use-llm] [--lang <lang>] [--output <path>] [--tests] <file.orca>  - Generate action scaffolds');
     console.log('  orca /refine-orca <file.orca>    - Fix verification errors (requires LLM)');
     process.exit(1);
   }
@@ -338,6 +362,7 @@ async function main(): Promise<void> {
 
     if (skill === '/generate-actions') {
       let useLLM = false;
+      let generateTests = false;
       let lang = 'typescript';
       let outputPath: string | undefined;
       let filePath = skillArgs[0];
@@ -345,12 +370,13 @@ async function main(): Promise<void> {
       for (let i = 0; i < skillArgs.length; i++) {
         const arg = skillArgs[i];
         if (arg === '--use-llm') useLLM = true;
+        if (arg === '--tests') generateTests = true;
         if (arg === '--lang' && skillArgs[i + 1]) lang = skillArgs[++i];
         if ((arg === '--output' || arg === '-o') && skillArgs[i + 1]) outputPath = skillArgs[++i];
         if (arg?.endsWith('.orca')) filePath = arg;
       }
 
-      await generateActions(filePath, lang, false, useLLM, outputPath);
+      await generateActions(filePath, lang, false, useLLM, outputPath, generateTests);
       return;
     }
 
@@ -359,6 +385,43 @@ async function main(): Promise<void> {
       const errorsJson = skillArgs.find(a => a.startsWith('[')) || '[]';
       const result = await refineSkill(filePath, JSON.parse(errorsJson));
       console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (skill === '/generate-orca') {
+      // /generate-orca "natural language description"
+      const spec = skillArgs[0] || skillArgs.find(a => !a.startsWith('--')) || '';
+      const outputPath = skillArgs.find(a => a.startsWith('--output='))?.replace('--output=', '') ||
+                         skillArgs.find(a => a.startsWith('-o='))?.replace('-o=', '');
+
+      if (!spec) {
+        console.error('Usage: /generate-orca "natural language specification" [--output=<file.orca>]');
+        process.exit(1);
+      }
+
+      const result = await generateOrcaSkill(spec);
+
+      if (result.status === 'success' && result.orca) {
+        if (outputPath) {
+          writeFileSync(outputPath, result.orca);
+          console.log(`Generated: ${outputPath}`);
+        } else {
+          console.log(result.orca);
+        }
+      } else if (result.status === 'requires_refinement' && result.orca) {
+        console.log('Machine generated but verification found issues. Outputting for manual review:');
+        console.log(result.orca);
+        if (result.verification?.errors.length) {
+          console.log('\nVerification issues:');
+          for (const err of result.verification.errors) {
+            console.log(`  [${err.severity.toUpperCase()}] ${err.code}: ${err.message}`);
+            if (err.suggestion) console.log(`    Suggestion: ${err.suggestion}`);
+          }
+        }
+      } else {
+        console.error(`Generation failed: ${result.error}`);
+        process.exit(1);
+      }
       return;
     }
 
@@ -389,14 +452,16 @@ async function main(): Promise<void> {
     } else if (command === 'actions') {
       let lang = 'typescript';
       let useLLM = false;
+      let generateTests = false;
       let outputPath: string | undefined;
       let filePath = filteredArgs[filteredArgs.length - 1];
       for (let i = 1; i < filteredArgs.length; i++) {
         if (filteredArgs[i] === '--lang' && filteredArgs[i + 1]) lang = filteredArgs[++i];
         if ((filteredArgs[i] === '--output' || filteredArgs[i] === '-o') && filteredArgs[i + 1]) outputPath = filteredArgs[++i];
         if (filteredArgs[i] === '--use-llm') useLLM = true;
+        if (filteredArgs[i] === '--tests') generateTests = true;
       }
-      await generateActions(filePath || filteredArgs[1], lang, json, useLLM, outputPath);
+      await generateActions(filePath || filteredArgs[1], lang, json, useLLM, outputPath, generateTests);
     } else {
       console.error(`Unknown command: ${command}`);
       process.exit(1);

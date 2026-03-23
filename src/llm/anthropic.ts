@@ -6,16 +6,25 @@ export class AnthropicProvider implements LLMProvider {
   private model: string;
   private maxTokens: number;
   private temperature: number;
+  private authType: 'x-api-key' | 'bearer';
 
   constructor(config: LLMProviderConfig) {
-    this.apiKey = config.api_key || process.env.ANTHROPIC_API_KEY || '';
     this.baseUrl = config.base_url || 'https://api.anthropic.com';
     this.model = config.model || 'claude-sonnet-4-6';
     this.maxTokens = config.max_tokens || 4096;
     this.temperature = config.temperature ?? 0.7;
 
+    // MiniMax uses Bearer token auth, Anthropic uses x-api-key
+    if (this.baseUrl.includes('minimax.io')) {
+      this.apiKey = config.api_key || process.env.MINIMAX_API_KEY || '';
+      this.authType = 'bearer';
+    } else {
+      this.apiKey = config.api_key || process.env.ANTHROPIC_API_KEY || '';
+      this.authType = 'x-api-key';
+    }
+
     if (!this.apiKey) {
-      throw new Error('ANTHROPIC_API_KEY is required for Anthropic provider');
+      throw new Error(`API key is required for ${this.baseUrl.includes('minimax.io') ? 'MINIMAX_API_KEY' : 'ANTHROPIC_API_KEY'}`);
     }
   }
 
@@ -28,14 +37,21 @@ export class AnthropicProvider implements LLMProvider {
     const systemMessage = request.messages.find(m => m.role === 'system');
     const otherMessages = request.messages.filter(m => m.role !== 'system');
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    };
+
+    if (this.authType === 'bearer') {
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    } else {
+      headers['x-api-key'] = this.apiKey;
+    }
+
     const response = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
+      headers,
       body: JSON.stringify({
         model: request.model || this.model,
         system: systemMessage?.content,

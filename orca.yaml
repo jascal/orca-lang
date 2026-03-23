@@ -1,5 +1,6 @@
 provider: anthropic
-model: claude-opus-4-6
+base_url: https://api.minimax.io/anthropic
+model: MiniMax-M2.7
 code_generator: typescript
 max_tokens: 4096
 temperature: 0.7

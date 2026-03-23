@@ -1,8 +1,8 @@
 import * as readline from 'readline';
 import { OAuthProvider, TokenRefreshResult } from '../types.js';
 
-const ANTHROPIC_AUTH_URL = 'https://auth.anthropic.com/oauth/authorize';
-const ANTHROPIC_TOKEN_URL = 'https://auth.anthropic.com/oauth/token';
+const ANTHROPIC_AUTH_URL = 'https://api.anthropic.com/oauth/authorize';
+const ANTHROPIC_TOKEN_URL = 'https://api.anthropic.com/oauth/token';
 
 export const anthropicOAuthProvider: OAuthProvider = 'anthropic';
 
@@ -136,7 +136,7 @@ export async function openBrowser(url: string): Promise<void> {
 }
 
 export async function getDeviceCode(): Promise<{ device_code: string; user_code: string; verification_uri: string }> {
-  const response = await fetch('https://auth.anthropic.com/oauth/device/code', {
+  const response = await fetch('https://api.anthropic.com/oauth/device/code', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',

@@ -56,13 +56,42 @@ export interface GenerateActionsResult {
   machine: string;
   actions: ActionScaffold[];
   scaffolds: Record<string, string>;
+  tests?: Record<string, string>;
+}
+
+export interface GenerateOrcaResult {
+  status: 'success' | 'error' | 'requires_refinement';
+  machine?: string;
+  orca?: string;
+  verification?: VerifySkillResult;
+  error?: string;
 }
 
 export async function verifySkill(filePath: string): Promise<VerifySkillResult> {
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
-  const machine = result.machine;
+
+  let machine: MachineDef;
+  try {
+    const tokens = tokenize(source);
+    const result = parse(tokens);
+    machine = result.machine;
+  } catch (err) {
+    // Parse error - return as verification error
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      status: 'invalid',
+      machine: extractMachineNameFromSource(source) || 'unknown',
+      states: 0,
+      events: 0,
+      transitions: 0,
+      errors: [{
+        code: 'PARSE_ERROR',
+        message,
+        severity: 'error',
+        suggestion: 'Check Orca syntax - ensure proper bracing, keywords, and punctuation',
+      }],
+    };
+  }
 
   const structural = checkStructural(machine);
   const completeness = checkCompleteness(machine);
@@ -155,7 +184,8 @@ export async function generateActionsSkill(
   filePath: string,
   language: string = 'typescript',
   useLLM: boolean = false,
-  configPath?: string
+  configPath?: string,
+  generateTests: boolean = false
 ): Promise<GenerateActionsResult> {
   const source = readFileSync(filePath, 'utf-8');
   const tokens = tokenize(source);
@@ -173,6 +203,7 @@ export async function generateActionsSkill(
   }));
 
   let scaffolds: Record<string, string> = {};
+  let tests: Record<string, string> = {};
 
   if (useLLM) {
     // Use LLM to generate action implementations
@@ -186,10 +217,18 @@ export async function generateActionsSkill(
     });
 
     scaffolds = await generateWithLLM(provider, actions, machine, language as CodeGeneratorType);
+
+    if (generateTests) {
+      tests = await generateUnitTests(provider, actions, machine, language as CodeGeneratorType);
+    }
   } else {
     // Use template-based scaffold generation
     for (const action of machine.actions) {
       scaffolds[action.name] = generateActionScaffold(action, machine, language);
+    }
+
+    if (generateTests) {
+      tests = generateTemplateTests(actions, machine);
     }
   }
 
@@ -198,6 +237,7 @@ export async function generateActionsSkill(
     machine: machine.name,
     actions,
     scaffolds,
+    tests: Object.keys(tests).length > 0 ? tests : undefined,
   };
 }
 
@@ -244,6 +284,164 @@ Generate the implementation:`;
   }
 
   return scaffolds;
+}
+
+async function generateUnitTests(
+  provider: LLMProvider,
+  actions: ActionScaffold[],
+  machine: MachineDef,
+  language: CodeGeneratorType
+): Promise<Record<string, string>> {
+  const tests: Record<string, string> = {};
+
+  const systemPrompt = `You are an expert in ${language} testing. Generate unit tests for state machine actions.
+Each test should verify the action's behavior with specific input contexts.
+Use a testing framework appropriate for ${language}.`;
+
+  for (const action of actions) {
+    const contextFields = machine.context.map(f => `${f.name}: ${f.type || 'unknown'}`).join(', ');
+
+    const userPrompt = `Machine: ${machine.name}
+Context type: { ${contextFields} }
+Action: ${action.signature}
+Context fields used: ${action.context_used.join(', ') || 'all fields'}
+
+Generate unit tests that verify:
+1. The action transforms context correctly
+2. All context fields are preserved (if not modified)
+3. Edge cases for the specific action
+
+Format: Provide test code in a code fence.`;
+
+    try {
+      const response = await provider.complete({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        model: '',
+        max_tokens: 2048,
+        temperature: 0.3,
+      });
+
+      tests[action.name] = response.content;
+    } catch (err) {
+      console.error(`Test generation error for action ${action.name}: ${err instanceof Error ? err.message : String(err)}`);
+      // Fall back to template tests on error
+      tests[action.name] = generateTemplateTestsForAction(action, machine);
+    }
+  }
+
+  return tests;
+}
+
+function generateTemplateTests(actions: ActionScaffold[], machine: MachineDef): Record<string, string> {
+  const tests: Record<string, string> = {};
+
+  for (const action of actions) {
+    tests[action.name] = generateTemplateTestsForAction(action, machine);
+  }
+
+  return tests;
+}
+
+function generateTemplateTestsForAction(action: ActionScaffold, machine: MachineDef): string {
+  const ctxFields = machine.context.map(f => {
+    const defaultValue = getDefaultValueForType(f.type);
+    return `    ${f.name}: ${defaultValue}`;
+  }).join(',\n');
+
+  const contextUsed = action.context_used.length > 0 ? action.context_used : machine.context.map(f => f.name);
+
+  if (action.hasEffect) {
+    return `// Tests for ${action.name}
+describe('${action.name}', () => {
+  const defaultContext = {
+${ctxFields}
+  };
+
+  it('should return updated context and emit effect', () => {
+    const ctx = { ...defaultContext };
+    const result = ${action.name}(ctx);
+
+    expect(result).toBeDefined();
+    expect(Array.isArray(result)).toBe(true);
+    expect(result[1]).toHaveProperty('type');
+    expect(result[1].type).toBe('${action.effectType}');
+  });
+
+  it('should preserve unmodified context fields', () => {
+    const ctx = { ...defaultContext };
+    const [newCtx] = ${action.name}(ctx);
+
+    ${contextUsed.filter(f => !actionModifiesField(action, f)).map(f =>
+      `expect(newCtx.${f}).toBe(ctx.${f});`
+    ).join('\n    ')}
+  });
+});
+`;
+  }
+
+  return `// Tests for ${action.name}
+describe('${action.name}', () => {
+  const defaultContext = {
+${ctxFields}
+  };
+
+  it('should transform context correctly', () => {
+    const ctx = { ...defaultContext };
+    const result = ${action.name}(ctx);
+
+    expect(result).toBeDefined();
+    expect(typeof result).toBe('object');
+  });
+
+  it('should preserve unmodified context fields', () => {
+    const ctx = { ...defaultContext };
+    const result = ${action.name}(ctx);
+
+    ${contextUsed.filter(f => !actionModifiesField(action, f)).map(f =>
+      `expect(result.${f}).toBe(ctx.${f});`
+    ).join('\n    ')}
+  });
+});
+`;
+}
+
+function actionModifiesField(action: ActionScaffold, fieldName: string): boolean {
+  // Heuristic: if the action name suggests modification of a field, it likely modifies it
+  const modifiers = ['increment', 'decrement', 'set', 'update', 'add', 'remove', 'clear', 'reset', 'toggle'];
+  const name = action.name.toLowerCase();
+
+  for (const mod of modifiers) {
+    if (name.includes(mod) && name.includes(fieldName)) {
+      return true;
+    }
+  }
+
+  // Check if it's a setter-style action
+  if (name.startsWith('set_') && fieldName === name.replace('set_', '')) {
+    return true;
+  }
+
+  return false;
+}
+
+function getDefaultValueForType(type: any): string {
+  if (!type) return "''";
+  if (typeof type === 'object' && 'kind' in type) {
+    switch (type.kind) {
+      case 'string': return "''";
+      case 'int':
+      case 'decimal': return '0';
+      case 'bool': return 'false';
+      case 'optional': return 'null';
+      case 'array': return '[]';
+      case 'map': return '{}';
+      case 'custom': return 'null';
+    }
+  }
+  return 'null';
 }
 
 function extractContextFields(machine: MachineDef, actionName: string): string[] {
@@ -368,4 +566,178 @@ Provide the corrected machine definition:`;
       error: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+const ORCA_SYNTAX_REFERENCE = `Orca State Machine Syntax Reference:
+
+machine <Name>
+
+context {
+  field1: string
+  field2: int = 0
+  field3: string?
+  field4: bool
+}
+
+events {
+  event1
+  event2
+  event3
+}
+
+state <name> [initial] [final] {
+  description: "..."
+  on_entry: -> action_name
+  on_exit: -> action_name
+  timeout: 5s -> target_state
+  ignore: event1, event2
+}
+
+guards {
+  guard_name: ctx.field > 10
+  another_guard: ctx.status == "active"
+}
+
+transitions {
+  state1 + event1           -> state2          : action1
+  state1 + event2 [guard]    -> state3          : action2
+  state2 + event3           -> state2          : _
+}
+
+actions {
+  action1: (ctx: Context) -> Context
+  action2: (ctx: Context, event: Event1) -> Context
+  action3: (ctx: Context) -> Context + Effect<EffectType>
+}
+
+Key syntax notes:
+- [initial] marks the initial state (exactly one required)
+- [final] marks terminal states (zero or more allowed)
+- _ as action means "no action"
+- [guard] where guard is a name from the guards block
+- [!guard] negates the guard
+- Effect<T> in return type means the action emits an effect
+- ctx.field accesses context fields
+- timeout: 5s -> target means 5 second timeout transition`;
+
+export async function generateOrcaSkill(
+  naturalLanguageSpec: string,
+  configPath?: string,
+  maxIterations: number = 3
+): Promise<GenerateOrcaResult> {
+  const config = loadConfig(configPath);
+
+  // Check if LLM is available
+  if (!config.api_key && !process.env.ANTHROPIC_API_KEY && !process.env.MINIMAX_API_KEY) {
+    return {
+      status: 'error',
+      error: 'No API key available. Set ANTHROPIC_API_KEY or MINIMAX_API_KEY in .env',
+    };
+  }
+
+  const provider = createProvider(config.provider, {
+    api_key: config.api_key,
+    base_url: config.base_url,
+    model: config.model,
+    max_tokens: config.max_tokens,
+    temperature: config.temperature,
+  });
+
+  const systemPrompt = `You are an expert in Orca state machine design. Generate Orca machine definitions from natural language descriptions.
+
+${ORCA_SYNTAX_REFERENCE}
+
+Important rules:
+- Always include exactly ONE initial state marked with [initial]
+- Final states should be marked with [final]
+- Every (state, event) pair must have a transition OR the event must be ignored
+- Use guards for conditional transitions
+- Context should contain all data needed for guards and actions
+- For effects (API calls, I/O), use Effect<T> return type
+
+Output ONLY the Orca machine definition, wrapped in a code fence, with no additional text.`;
+
+  let currentOrca = '';
+  let iteration = 0;
+
+  while (iteration < maxIterations) {
+    const userPrompt = iteration === 0
+      ? `Generate an Orca state machine for:\n${naturalLanguageSpec}`
+      : `The previous Orca machine had verification errors. Fix them:\n\nPrevious Orca:\n${currentOrca}\n\nVerification errors:\n${JSON.stringify(lastErrors, null, 2)}\n\nProvide the corrected Orca machine definition:`;
+
+    try {
+      const response = await provider.complete({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        model: '',
+        max_tokens: 4096,
+        temperature: 0.5,
+      });
+
+      // Extract Orca code from response
+      currentOrca = stripCodeFence(response.content);
+
+      // Verify the generated Orca
+      const tempFile = `/tmp/orca_gen_${Date.now()}.orca`;
+      const { writeFileSync } = await import('fs');
+      writeFileSync(tempFile, currentOrca);
+
+      const verification = await verifySkill(tempFile);
+
+      if (verification.status === 'valid') {
+        // Clean up temp file
+        try {
+          const { unlinkSync } = await import('fs');
+          unlinkSync(tempFile);
+        } catch {}
+
+        return {
+          status: 'success',
+          machine: verification.machine,
+          orca: currentOrca,
+          verification,
+        };
+      }
+
+      lastErrors = verification.errors;
+      iteration++;
+    } catch (err) {
+      return {
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  return {
+    status: 'requires_refinement',
+    machine: extractMachineNameFromSource(currentOrca),
+    orca: currentOrca,
+    verification: await verifySkill(`/tmp/orca_gen_${Date.now()}.orca`).catch(() => ({
+      status: 'invalid' as const,
+      machine: 'unknown',
+      states: 0,
+      events: 0,
+      transitions: 0,
+      errors: [],
+    })),
+  };
+}
+
+let lastErrors: SkillError[] = [];
+
+function stripCodeFence(code: string): string {
+  return code
+    .replace(/^```orca\n/, '')
+    .replace(/^```\n/, '')
+    .replace(/^```typescript\n/, '')
+    .replace(/\n```$/, '')
+    .trim();
+}
+
+function extractMachineNameFromSource(orca: string): string {
+  const match = orca.match(/^machine\s+(\w+)/m);
+  return match ? match[1] : 'Unknown';
 }
