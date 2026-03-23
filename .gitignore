@@ -28,3 +28,6 @@ coverage/
 # Misc
 *.tgz
 .cache/
+
+# Generated output
+actions/
