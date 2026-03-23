@@ -1,11 +1,13 @@
 import { LLMProvider, LLMProviderConfig } from './provider.js';
+import type { LLMMessage, LLMRequest, LLMResponse } from './provider.js';
 import { AnthropicProvider } from './anthropic.js';
 import { OpenAIProvider } from './openai.js';
 import { OllamaProvider } from './ollama.js';
 import { GrokProvider } from './grok.js';
 import { LLMProviderType } from '../config/types.js';
 
-export { LLMProvider, LLMMessage, LLMRequest, LLMResponse } from './provider.js';
+export type { LLMProvider };
+export type { LLMMessage, LLMRequest, LLMResponse };
 export { AnthropicProvider } from './anthropic.js';
 export { OpenAIProvider } from './openai.js';
 export { OllamaProvider } from './ollama.js';

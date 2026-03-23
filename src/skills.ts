@@ -8,7 +8,8 @@ import { compileToXState } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { MachineDef } from './parser/ast.js';
 import { loadConfig, resolveConfigOverrides } from './config/index.js';
-import { createProvider, LLMProvider } from './llm/index.js';
+import { createProvider } from './llm/index.js';
+import type { LLMProvider } from './llm/index.js';
 import { getCodeGenerator } from './generators/index.js';
 import { CodeGeneratorType } from './config/types.js';
 
