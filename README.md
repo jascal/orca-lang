@@ -89,6 +89,12 @@ orca actions examples/payment-processor.orca
 
 # With LLM (requires API key)
 orca /generate-actions --use-llm examples/payment-processor.orca typescript
+
+# Output to directory (one file per action)
+orca /generate-actions --use-llm examples/payment-processor.orca --output ./actions/
+
+# Output to single file (all actions combined)
+orca /generate-actions --use-llm examples/payment-processor.orca --output ./actions.ts
 ```
 
 See [docs/orca-proposal.md](docs/orca-proposal.md) for the full design specification.

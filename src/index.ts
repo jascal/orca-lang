@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { join, basename } from 'path';
 import { tokenize } from './parser/lexer.js';
 import { parse } from './parser/parser.js';
 import { checkStructural } from './verifier/structural.js';
@@ -92,8 +93,31 @@ async function visualize(filePath: string): Promise<void> {
   console.log('\nYou can render this at: https://mermaid.live');
 }
 
-async function generateActions(filePath: string, language: string, json: boolean = false, useLLM: boolean = false): Promise<void> {
+async function generateActions(filePath: string, language: string, json: boolean = false, useLLM: boolean = false, outputPath?: string): Promise<void> {
   const result = await generateActionsSkill(filePath, language, useLLM);
+
+  if (outputPath) {
+    // Write scaffolds to output directory or file
+    const isDir = outputPath.endsWith('/') || !outputPath.includes('.');
+    if (isDir) {
+      if (!existsSync(outputPath)) {
+        mkdirSync(outputPath, { recursive: true });
+      }
+      for (const [name, scaffold] of Object.entries(result.scaffolds)) {
+        const fileName = `${name}.ts`;
+        writeFileSync(join(outputPath, fileName), scaffold);
+        console.log(`Wrote: ${join(outputPath, fileName)}`);
+      }
+    } else {
+      // Combine all scaffolds into single file
+      const combined = Object.entries(result.scaffolds)
+        .map(([name, scaffold]) => `// ${name}\n${scaffold}`)
+        .join('\n\n');
+      writeFileSync(outputPath, combined);
+      console.log(`Wrote: ${outputPath}`);
+    }
+    return;
+  }
 
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -138,7 +162,7 @@ async function main(): Promise<void> {
     console.log('Skills (LLM-friendly):');
     console.log('  orca /verify-orca <file.orca>    - Structured JSON verification');
     console.log('  orca /compile-orca <file.orca>   - Structured JSON compilation');
-    console.log('  orca /generate-actions [--use-llm] [--lang <lang>] <file.orca>  - Generate action scaffolds');
+    console.log('  orca /generate-actions [--use-llm] [--lang <lang>] [--output <path>] <file.orca>  - Generate action scaffolds');
     console.log('  orca /refine-orca <file.orca>    - Fix verification errors (requires LLM)');
     process.exit(1);
   }
@@ -165,16 +189,18 @@ async function main(): Promise<void> {
     if (skill === '/generate-actions') {
       let useLLM = false;
       let lang = 'typescript';
+      let outputPath: string | undefined;
       let filePath = skillArgs[0];
 
       for (let i = 0; i < skillArgs.length; i++) {
-        if (skillArgs[i] === '--use-llm') useLLM = true;
-        if (skillArgs[i] === '--lang' && skillArgs[i + 1]) lang = skillArgs[++i];
-        if (skillArgs[i]?.endsWith('.orca')) filePath = skillArgs[i];
+        const arg = skillArgs[i];
+        if (arg === '--use-llm') useLLM = true;
+        if (arg === '--lang' && skillArgs[i + 1]) lang = skillArgs[++i];
+        if ((arg === '--output' || arg === '-o') && skillArgs[i + 1]) outputPath = skillArgs[++i];
+        if (arg?.endsWith('.orca')) filePath = arg;
       }
 
-      const result = await generateActionsSkill(filePath, lang, useLLM);
-      console.log(JSON.stringify(result, null, 2));
+      await generateActions(filePath, lang, false, useLLM, outputPath);
       return;
     }
 
@@ -213,13 +239,14 @@ async function main(): Promise<void> {
     } else if (command === 'actions') {
       let lang = 'typescript';
       let useLLM = false;
+      let outputPath: string | undefined;
       let filePath = filteredArgs[filteredArgs.length - 1];
-      if (filteredArgs[1] === '--lang' && filteredArgs[2]) {
-        lang = filteredArgs[2];
-        filePath = filteredArgs[3] || filteredArgs[1];
+      for (let i = 1; i < filteredArgs.length; i++) {
+        if (filteredArgs[i] === '--lang' && filteredArgs[i + 1]) lang = filteredArgs[++i];
+        if ((filteredArgs[i] === '--output' || filteredArgs[i] === '-o') && filteredArgs[i + 1]) outputPath = filteredArgs[++i];
+        if (filteredArgs[i] === '--use-llm') useLLM = true;
       }
-      if (filteredArgs.includes('--use-llm')) useLLM = true;
-      await generateActions(filePath || filteredArgs[1], lang, json, useLLM);
+      await generateActions(filePath || filteredArgs[1], lang, json, useLLM, outputPath);
     } else {
       console.error(`Unknown command: ${command}`);
       process.exit(1);

@@ -1,0 +1,5 @@
+provider: anthropic
+model: claude-opus-4-6
+code_generator: typescript
+max_tokens: 4096
+temperature: 0.7
