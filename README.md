@@ -81,6 +81,30 @@ Orca uses its own LLM configuration, separate from the ambient context.
 | xAI (Grok) | `XAI_API_KEY` | |
 | Ollama | — | Set `base_url: http://localhost:11434` |
 
+### Authentication
+
+Orca supports two authentication methods:
+
+**1. API Key (simple)**
+```bash
+cp .env.example .env
+# Edit .env and add your API key
+```
+
+**2. OAuth (for organization/team billing)**
+```bash
+# Login with OAuth (supports Anthropic, MiniMax)
+orca login --provider anthropic
+
+# Check auth status
+orca auth
+
+# Logout
+orca logout
+```
+
+Credentials are stored in `~/.orca/auth_profiles.json`.
+
 ### Generate Action Implementations
 
 ```bash
