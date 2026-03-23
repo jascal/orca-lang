@@ -21,6 +21,14 @@ function formatErrors(errors: { code: string; message: string; severity: string;
   }
 }
 
+function stripCodeFence(code: string): string {
+  return code
+    .replace(/^```typescript\n/, '')
+    .replace(/^```\n/, '')
+    .replace(/\n```$/, '')
+    .trim();
+}
+
 async function verify(filePath: string, json: boolean = false): Promise<void> {
   if (json) {
     const result = await verifySkill(filePath);
@@ -105,13 +113,14 @@ async function generateActions(filePath: string, language: string, json: boolean
       }
       for (const [name, scaffold] of Object.entries(result.scaffolds)) {
         const fileName = `${name}.ts`;
-        writeFileSync(join(outputPath, fileName), scaffold);
+        const code = stripCodeFence(scaffold);
+        writeFileSync(join(outputPath, fileName), code);
         console.log(`Wrote: ${join(outputPath, fileName)}`);
       }
     } else {
       // Combine all scaffolds into single file
       const combined = Object.entries(result.scaffolds)
-        .map(([name, scaffold]) => `// ${name}\n${scaffold}`)
+        .map(([name, scaffold]) => `// ${name}\n${stripCodeFence(scaffold)}`)
         .join('\n\n');
       writeFileSync(outputPath, combined);
       console.log(`Wrote: ${outputPath}`);
