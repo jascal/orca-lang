@@ -51,12 +51,44 @@ Source (.orca) → Lexer → Parser → AST → Verifier → Compiler → Output
 
 ## LLM Integration
 
-Orca uses its own LLM configuration, separate from the ambient context. Configure in `orca.yaml`:
+Orca uses its own LLM configuration, separate from the ambient context.
 
-```yaml
-provider: anthropic
-model: claude-sonnet-4-6
-code_generator: typescript
+### Setup
+
+1. **Copy the example env file:**
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Add your API key** to `.env`:
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+
+3. **Configure** in `orca.yaml`:
+   ```yaml
+   provider: anthropic
+   model: claude-sonnet-4-6
+   code_generator: typescript
+   ```
+
+### Supported Providers
+
+| Provider | Environment Variable | Notes |
+|----------|-------------------|-------|
+| Anthropic | `ANTHROPIC_API_KEY` | Default |
+| OpenAI | `OPENAI_API_KEY` | |
+| xAI (Grok) | `XAI_API_KEY` | |
+| Ollama | — | Set `base_url: http://localhost:11434` |
+
+### Generate Action Implementations
+
+```bash
+# Without LLM (template-based, no API key needed)
+orca actions examples/payment-processor.orca
+
+# With LLM (requires API key)
+orca /generate-actions --use-llm examples/payment-processor.orca typescript
 ```
 
 See [docs/orca-proposal.md](docs/orca-proposal.md) for the full design specification.
