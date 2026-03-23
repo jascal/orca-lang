@@ -13,12 +13,11 @@ export function compileToXState(machine: MachineDef): string {
     lines.push(`      ${field.name}: ${typeToTs(field)},`);
   }
   lines.push(`    },`);
-  lines.push(`    events: {`);
+  lines.push(`    events: |`);
   for (let i = 0; i < machine.events.length; i++) {
     const event = machine.events[i];
-    lines.push(`      type: '${event.name}'${i < machine.events.length - 1 ? ',' : ''}`);
+    lines.push(`      | { type: '${event.name}' }${i < machine.events.length - 1 ? '' : ''}`);
   }
-  lines.push(`    },`);
   lines.push(`  },`);
   lines.push(`  context: {`);
   for (const field of machine.context) {
@@ -34,6 +33,9 @@ export function compileToXState(machine: MachineDef): string {
     lines.push(`    ${state.name}: {`);
     if (state.description) {
       lines.push(`      description: '${escapeString(state.description)}',`);
+    }
+    if (state.isInitial) {
+      lines.push(`      type: 'initial',`);
     }
     if (state.isFinal) {
       lines.push(`      type: 'final',`);

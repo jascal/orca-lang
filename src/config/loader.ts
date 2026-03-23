@@ -4,6 +4,36 @@ import { homedir } from 'os';
 import yaml from 'js-yaml';
 import { OrcaConfig, DEFAULT_CONFIG } from './types.js';
 
+let envLoaded = false;
+
+function loadEnvFile(): void {
+  if (envLoaded) return;
+  envLoaded = true;
+
+  // Load from project root .env
+  const cwd = process.cwd();
+  const envPath = join(cwd, '.env');
+  if (existsSync(envPath)) {
+    const content = readFileSync(envPath, 'utf-8');
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eqIndex = trimmed.indexOf('=');
+      if (eqIndex === -1) continue;
+      const key = trimmed.slice(0, eqIndex).trim();
+      let value = trimmed.slice(eqIndex + 1).trim();
+      // Remove surrounding quotes
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (key && !process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  }
+}
+
 function interpolateEnvVars(obj: unknown): unknown {
   if (typeof obj === 'string') {
     // Replace ${VAR_NAME} with environment variable value
@@ -39,6 +69,7 @@ function deepMerge(target: OrcaConfig, source: Partial<OrcaConfig>): OrcaConfig 
 }
 
 export function loadConfig(configPath?: string): OrcaConfig {
+  loadEnvFile();
   const configs: Partial<OrcaConfig>[] = [];
 
   // 1. Global default

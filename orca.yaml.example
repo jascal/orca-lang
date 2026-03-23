@@ -1,0 +1,14 @@
+# Orca Configuration
+#
+# Copy this file to orca.yaml and fill in your credentials.
+# Config precedence: ~/.orca/default.yaml < ./orca.yaml < ./orca/orca.yaml
+#
+# Supported providers: anthropic, openai, grok, ollama
+#
+# Environment variables use ${VAR_NAME} syntax:
+provider: anthropic
+model: claude-sonnet-4-6
+code_generator: typescript
+max_tokens: 4096
+temperature: 0.7
+# api_key: ${ANTHROPIC_API_KEY}  # Uncomment and set env var

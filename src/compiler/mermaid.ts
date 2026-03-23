@@ -10,10 +10,10 @@ export function compileToMermaid(machine: MachineDef): string {
   // Add style for initial state
   lines.push(`  [*] --> ${getInitialStateName(machine)}`);
 
-  // Add states with descriptions
+  // Add termination transitions for final states
   for (const state of machine.states) {
     if (state.isFinal) {
-      lines.push(`  ${state.name} --> [*] :_final`);
+      lines.push(`  ${state.name} --> [*]`);
     }
   }
 

@@ -237,6 +237,7 @@ Generate the implementation:`;
 
       scaffolds[action.name] = response.content;
     } catch (err) {
+      console.error(`LLM error for action ${action.name}: ${err instanceof Error ? err.message : String(err)}`);
       // Fall back to scaffold on error
       scaffolds[action.name] = generateActionScaffold(action, machine, language);
     }

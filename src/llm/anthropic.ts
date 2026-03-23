@@ -24,6 +24,10 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
+    // Separate system message from user/assistant messages
+    const systemMessage = request.messages.find(m => m.role === 'system');
+    const otherMessages = request.messages.filter(m => m.role !== 'system');
+
     const response = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: {
@@ -34,8 +38,9 @@ export class AnthropicProvider implements LLMProvider {
       },
       body: JSON.stringify({
         model: request.model || this.model,
-        messages: request.messages.map(m => ({
-          role: m.role,
+        system: systemMessage?.content,
+        messages: otherMessages.map(m => ({
+          role: m.role === 'assistant' ? 'assistant' : 'user',
           content: m.content,
         })),
         max_tokens: request.max_tokens || this.maxTokens,

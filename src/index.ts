@@ -92,8 +92,8 @@ async function visualize(filePath: string): Promise<void> {
   console.log('\nYou can render this at: https://mermaid.live');
 }
 
-async function generateActions(filePath: string, language: string, json: boolean = false): Promise<void> {
-  const result = await generateActionsSkill(filePath, language);
+async function generateActions(filePath: string, language: string, json: boolean = false, useLLM: boolean = false): Promise<void> {
+  const result = await generateActionsSkill(filePath, language, useLLM);
 
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     console.log('Skills (LLM-friendly):');
     console.log('  orca /verify-orca <file.orca>    - Structured JSON verification');
     console.log('  orca /compile-orca <file.orca>   - Structured JSON compilation');
-    console.log('  orca /generate-actions <file.orca>  - Generate action scaffolds');
+    console.log('  orca /generate-actions [--use-llm] [--lang <lang>] <file.orca>  - Generate action scaffolds');
     console.log('  orca /refine-orca <file.orca>    - Fix verification errors (requires LLM)');
     process.exit(1);
   }
@@ -163,9 +163,17 @@ async function main(): Promise<void> {
     }
 
     if (skill === '/generate-actions') {
-      const lang = skillArgs[0] === '--lang' ? skillArgs[1] : 'typescript';
-      const filePath = lang.endsWith('.orca') ? lang : (skillArgs.find(a => a.endsWith('.orca')) || skillArgs[0]);
-      const result = await generateActionsSkill(filePath, lang);
+      let useLLM = false;
+      let lang = 'typescript';
+      let filePath = skillArgs[0];
+
+      for (let i = 0; i < skillArgs.length; i++) {
+        if (skillArgs[i] === '--use-llm') useLLM = true;
+        if (skillArgs[i] === '--lang' && skillArgs[i + 1]) lang = skillArgs[++i];
+        if (skillArgs[i]?.endsWith('.orca')) filePath = skillArgs[i];
+      }
+
+      const result = await generateActionsSkill(filePath, lang, useLLM);
       console.log(JSON.stringify(result, null, 2));
       return;
     }
@@ -204,12 +212,14 @@ async function main(): Promise<void> {
       await visualize(filteredArgs[1] || filteredArgs[0]);
     } else if (command === 'actions') {
       let lang = 'typescript';
+      let useLLM = false;
       let filePath = filteredArgs[filteredArgs.length - 1];
       if (filteredArgs[1] === '--lang' && filteredArgs[2]) {
         lang = filteredArgs[2];
         filePath = filteredArgs[3] || filteredArgs[1];
       }
-      await generateActions(filePath || filteredArgs[1], lang, json);
+      if (filteredArgs.includes('--use-llm')) useLLM = true;
+      await generateActions(filePath || filteredArgs[1], lang, json, useLLM);
     } else {
       console.error(`Unknown command: ${command}`);
       process.exit(1);
