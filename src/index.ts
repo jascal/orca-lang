@@ -2,6 +2,20 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, basename } from 'path';
+import { setAuthProfile, deleteAuthProfile, listAuthProfiles, getAuthProfile } from './auth/store.js';
+import { getValidAccessToken } from './auth/refresh.js';
+import {
+  buildAuthorizationUrl as buildAnthropicUrl,
+  getDeviceCode,
+  pollForToken,
+  promptForCode,
+  openBrowser,
+  anthropicOAuthProvider,
+} from './auth/providers/anthropic.js';
+import {
+  buildAuthorizationUrl as buildMiniMaxUrl,
+  minimaxOAuthProvider,
+} from './auth/providers/minimax.js';
 import { tokenize } from './parser/lexer.js';
 import { parse } from './parser/parser.js';
 import { checkStructural } from './verifier/structural.js';
@@ -10,6 +24,102 @@ import { checkDeterminism } from './verifier/determinism.js';
 import { compileToXState } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { verifySkill, compileSkill, generateActionsSkill, refineSkill } from './skills.js';
+
+async function login(provider: string, profileId: string = 'default'): Promise<void> {
+  console.log(`Logging in to ${provider}...`);
+
+  try {
+    if (provider === 'anthropic') {
+      // Use device code flow for simpler CLI experience
+      const deviceCodes = await getDeviceCode();
+      console.log(`Please visit: ${deviceCodes.verification_uri}`);
+      console.log(`And enter code: ${deviceCodes.user_code}`);
+      await openBrowser(deviceCodes.verification_uri);
+
+      const tokens = await pollForToken(deviceCodes.device_code);
+
+      setAuthProfile(profileId, {
+        mode: 'oauth',
+        provider: 'anthropic',
+        access: tokens.access,
+        refresh: tokens.refresh ?? '',
+        expires: tokens.expires,
+      });
+
+      console.log('Successfully logged in!');
+    } else if (provider === 'minimax') {
+      // Build authorization URL
+      const authUrl = buildMiniMaxUrl('orca-cli', 'http://localhost:9999/callback');
+      console.log(`Please visit: ${authUrl}`);
+      await openBrowser(authUrl);
+
+      console.log('After authorizing, you will be redirected to a callback URL.');
+      console.log('Copy the authorization code from the URL and paste it here:');
+      const code = await promptForCode();
+
+      // Note: In a full implementation, we'd exchange the code for tokens
+      // For now, this is a placeholder
+      console.log('MiniMax OAuth flow requires server callback - this is a placeholder.');
+    } else {
+      console.error(`Unsupported provider: ${provider}`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(`Login failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+}
+
+async function logout(profileId?: string): Promise<void> {
+  const profiles = profileId ? [profileId] : listAuthProfiles();
+
+  if (profiles.length === 0) {
+    console.log('No auth profiles found.');
+    return;
+  }
+
+  for (const id of profiles) {
+    if (deleteAuthProfile(id)) {
+      console.log(`Logged out: ${id}`);
+    }
+  }
+}
+
+async function auth(showDoctor: boolean = false): Promise<void> {
+  const profiles = listAuthProfiles();
+
+  if (profiles.length === 0) {
+    console.log('No auth profiles configured.');
+    console.log('Run "orca login" to set up authentication.');
+    return;
+  }
+
+  console.log('Auth profiles:');
+  for (const profileId of profiles) {
+    const profile = getAuthProfile(profileId);
+    if (!profile) continue;
+
+    const status = profile.mode === 'oauth' && profile.expires
+      ? (Date.now() < profile.expires ? 'valid' : 'expired')
+      : 'valid';
+
+    console.log(`  ${profileId}:`);
+    console.log(`    provider: ${profile.provider}`);
+    console.log(`    mode: ${profile.mode}`);
+    console.log(`    status: ${status}`);
+    if (profile.email) {
+      console.log(`    email: ${profile.email}`);
+    }
+  }
+
+  // Try to get a valid token for the default profile
+  const defaultCreds = await getValidAccessToken('default');
+  if (defaultCreds) {
+    console.log('\nDefault profile is ready to use.');
+  } else if (profiles.includes('default')) {
+    console.log('\nDefault profile needs re-authentication. Run "orca login".');
+  }
+}
 
 function formatErrors(errors: { code: string; message: string; severity: string; suggestion?: string }[]): void {
   for (const err of errors) {
@@ -168,12 +278,43 @@ async function main(): Promise<void> {
     console.log('  orca visualize <file.orca>                   - Compile and show Mermaid');
     console.log('  orca actions [--json] [--lang <lang>] <file.orca>  - Generate action scaffolds');
     console.log('');
+    console.log('Auth commands:');
+    console.log('  orca login [--provider <provider>] [--profile <id>]  - Login to an LLM provider');
+    console.log('  orca logout [--profile <id>]                       - Remove auth credentials');
+    console.log('  orca auth [--doctor]                               - Show auth status');
+    console.log('');
     console.log('Skills (LLM-friendly):');
     console.log('  orca /verify-orca <file.orca>    - Structured JSON verification');
     console.log('  orca /compile-orca <file.orca>   - Structured JSON compilation');
     console.log('  orca /generate-actions [--use-llm] [--lang <lang>] [--output <path>] <file.orca>  - Generate action scaffolds');
     console.log('  orca /refine-orca <file.orca>    - Fix verification errors (requires LLM)');
     process.exit(1);
+  }
+
+  // Handle auth commands
+  if (args[0] === 'login') {
+    let provider = 'anthropic';
+    let profileId = 'default';
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--provider' && args[i + 1]) provider = args[++i];
+      if (args[i] === '--profile' && args[i + 1]) profileId = args[++i];
+    }
+    await login(provider, profileId);
+    return;
+  }
+
+  if (args[0] === 'logout') {
+    let profileId: string | undefined;
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--profile' && args[i + 1]) profileId = args[++i];
+    }
+    await logout(profileId);
+    return;
+  }
+
+  if (args[0] === 'auth') {
+    await auth(args.includes('--doctor'));
+    return;
   }
 
   // Check for skill invocations (starting with /)
