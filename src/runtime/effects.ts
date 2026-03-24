@@ -1,38 +1,48 @@
 // Effect routing and execution for Orca runtime
-// Phase 1 only defines the types - full runtime comes in Phase 2
 
 export interface Effect<T = unknown> {
   type: string;
   payload: T;
 }
 
-export interface EffectHandler<T = unknown> {
-  (effect: Effect<T>): Promise<void> | void;
+export interface EffectResult {
+  status: 'success' | 'failure' | 'timeout';
+  data?: unknown;
+  error?: string;
 }
+
+export type EffectHandler<T = unknown> = (effect: Effect<T>) => Promise<EffectResult> | EffectResult;
 
 export interface EffectRouter {
   register<T>(type: string, handler: EffectHandler<T>): void;
-  route<T>(effect: Effect<T>): Promise<void> | void;
+  route<T>(effect: Effect<T>): Promise<EffectResult>;
 }
 
-export function createEffectRouter(): EffectRouter {
-  const handlers = new Map<string, EffectHandler>();
+export function createEffectRouter(handlers?: Record<string, EffectHandler>): EffectRouter {
+  const handlerMap = new Map<string, EffectHandler<unknown>>();
+  if (handlers) {
+    for (const [key, value] of Object.entries(handlers)) {
+      handlerMap.set(key, value as EffectHandler<unknown>);
+    }
+  }
 
   return {
     register(type, handler) {
-      handlers.set(type, handler as EffectHandler);
+      handlerMap.set(type, handler as EffectHandler<unknown>);
     },
     route(effect) {
-      const handler = handlers.get(effect.type);
+      const handler = handlerMap.get(effect.type) as EffectHandler<unknown> | undefined;
       if (!handler) {
-        throw new Error(`No handler registered for effect type: ${effect.type}`);
+        return Promise.resolve({
+          status: 'failure' as const,
+          error: `No handler registered for effect type: ${effect.type}`,
+        });
       }
-      return handler(effect);
+      return Promise.resolve(handler(effect));
     },
   };
 }
 
-export function emit<T>(payload: T): Effect<T> {
-  // This is a marker function - actual emission happens through the router
-  return { type: 'unknown', payload };
+export function emit<T>(payload: T, type: string = 'anonymous'): Effect<T> {
+  return { type, payload };
 }

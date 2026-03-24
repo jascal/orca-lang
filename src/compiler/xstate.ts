@@ -1,4 +1,192 @@
-import { MachineDef, Transition } from '../parser/ast.js';
+import { MachineDef, Transition, ActionSignature, StateDef } from '../parser/ast.js';
+import { createMachine, assign, fromCallback } from 'xstate';
+
+export interface CompiledMachine {
+  config: any; // XState MachineConfig type
+  effectMeta: {
+    effectfulActions: Array<{
+      name: string;
+      effectType: string;
+      state: string;
+      transition?: string;
+    }>;
+  };
+}
+
+export function compileToXStateMachine(machine: MachineDef): CompiledMachine {
+  const effectMeta = {
+    effectfulActions: findEffectfulActions(machine),
+  };
+
+  const config: any = {
+    id: machine.name,
+    types: {
+      context: {} as any,
+      events: {} as any,
+    },
+    context: buildContext(machine),
+    initial: getInitialState(machine),
+    states: buildStates(machine),
+  };
+
+  return { config, effectMeta };
+}
+
+function findEffectfulActions(machine: MachineDef) {
+  const effectful: CompiledMachine['effectMeta']['effectfulActions'] = [];
+
+  for (const action of machine.actions) {
+    if (action.hasEffect && action.effectType) {
+      // Find which state uses this action
+      for (const state of machine.states) {
+        if (state.onEntry === action.name || state.onExit === action.name) {
+          effectful.push({ name: action.name, effectType: action.effectType, state: state.name });
+        }
+      }
+      // Find transitions using this action
+      for (const t of machine.transitions) {
+        if (t.action === action.name) {
+          effectful.push({ name: action.name, effectType: action.effectType, state: t.source, transition: t.target });
+        }
+      }
+    }
+  }
+
+  return effectful;
+}
+
+function buildContext(machine: MachineDef): Record<string, unknown> {
+  const ctx: Record<string, unknown> = {};
+  for (const field of machine.context) {
+    ctx[field.name] = field.defaultValue !== undefined
+      ? field.defaultValue
+      : getDefaultForType(field);
+  }
+  return ctx;
+}
+
+function buildStates(machine: MachineDef): Record<string, any> {
+  const states: Record<string, any> = {};
+
+  for (const state of machine.states) {
+    states[state.name] = buildStateConfig(state, machine);
+  }
+
+  return states;
+}
+
+function buildStateConfig(state: StateDef, machine: MachineDef): any {
+  const config: any = {};
+
+  if (state.description) {
+    config.description = state.description;
+  }
+  if (state.isInitial) {
+    config.type = 'initial';
+  }
+  if (state.isFinal) {
+    config.type = 'final';
+  }
+  if (state.onEntry) {
+    const action = machine.actions.find(a => a.name === state.onEntry);
+    if (action?.hasEffect) {
+      // Effectful action - handled via invoke
+      config.entry = buildEffectInvoke(state.onEntry, action, 'entry');
+    } else {
+      config.entry = state.onEntry;
+    }
+  }
+  if (state.onExit) {
+    config.exit = state.onExit;
+  }
+
+  // Handle transitions
+  const stateTransitions = machine.transitions.filter(t => t.source === state.name);
+  if (stateTransitions.length > 0) {
+    config.on = buildTransitions(stateTransitions, machine);
+  }
+
+  // Handle timeout
+  if (state.timeout) {
+    config.after = {
+      [state.timeout.duration]: { target: state.timeout.target },
+    };
+  }
+
+  return config;
+}
+
+function buildEffectInvoke(actionName: string, action: ActionSignature, usage: 'entry' | 'exit' | 'transition'): any {
+  // For effectful actions, we create an invoke that calls the effect handler
+  // The actual handler wiring happens at runtime
+  return {
+    invoke: {
+      src: `effect:${action.effectType}`,
+      input: ({ context, event }: { context: any; event: any }) => ({ context, event, action: actionName, usage }),
+      onDone: {
+        target: 'authorized', // This gets resolved at runtime based on transition
+        actions: assign({
+          _effectResult: ({ event }: any) => event.output,
+        }),
+      },
+      onError: {
+        target: 'declined',
+        actions: assign({
+          _effectError: ({ event }: any) => event.error?.message,
+        }),
+      },
+    },
+  };
+}
+
+function buildTransitions(transitions: Transition[], machine: MachineDef): Record<string, any> {
+  const on: Record<string, any> = {};
+  const eventGroups = groupByEvent(transitions);
+
+  for (const [eventName, trans] of Object.entries(eventGroups)) {
+    if (trans.length === 1 && !trans[0].guard) {
+      // Single unguarded transition
+      const t = trans[0];
+      const action = machine.actions.find(a => a.name === t.action);
+
+      if (action?.hasEffect) {
+        // Effectful transition
+        on[eventName] = {
+          target: t.target,
+          actions: {
+            type: 'effectful',
+            name: t.action,
+            effectType: action.effectType,
+          },
+        };
+      } else {
+        on[eventName] = {
+          target: t.target,
+          actions: t.action || undefined,
+        };
+      }
+    } else {
+      // Multiple transitions or guarded - use array format
+      on[eventName] = trans.map(t => {
+        const action = machine.actions.find(a => a.name === t.action);
+        const target = t.guard ? `#${t.target}` : t.target;
+
+        const transition: any = { target };
+        if (t.guard) {
+          const guardName = t.guard.negated ? `!${t.guard.name}` : t.guard.name;
+          transition.guard = { type: guardName };
+        }
+        if (t.action) {
+          transition.actions = t.action;
+        }
+
+        return transition;
+      });
+    }
+  }
+
+  return on;
+}
 
 export function compileToXState(machine: MachineDef): string {
   const lines: string[] = [];
