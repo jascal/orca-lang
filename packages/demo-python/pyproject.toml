@@ -4,12 +4,15 @@ version = "0.1.0"
 description = "Demo app using orca-runtime-python"
 requires-python = ">=3.9"
 dependencies = [
-    "orca-runtime-python @ file:///../runtime-python"
+    "orca-runtime-python",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio"]
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []

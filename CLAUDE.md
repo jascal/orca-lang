@@ -19,16 +19,25 @@ packages/
   demo-python/     Agent framework demo (uses runtime-python)
 ```
 
+## Setup
+
+```bash
+# TypeScript packages (from repo root)
+pnpm install
+
+# Python packages (from repo root)
+python3 -m venv .venv
+.venv/bin/pip install -e packages/runtime-python
+.venv/bin/pip install -e packages/demo-python
+```
+
 ## Commands
 
 ```bash
-# Install all dependencies (from repo root)
-pnpm install
-
 # Build all TypeScript packages
 pnpm build
 
-# Run all tests
+# Run all tests (TypeScript)
 pnpm test
 
 # Run only orca-lang tests
@@ -37,10 +46,11 @@ pnpm test:lang
 # Run demo-ts smoke test
 pnpm test:demo-ts
 
-# Package-specific commands (from package directory)
-cd packages/orca-lang && pnpm test
-cd packages/demo-ts && pnpm run cli          # interactive text adventure
-cd packages/demo-python && PYTHONPATH=../runtime-python python3 demo.py
+# Run Python demo
+.venv/bin/python packages/demo-python/demo.py
+
+# Interactive text adventure
+cd packages/demo-ts && pnpm run cli
 
 # CLI commands (from packages/orca-lang)
 cd packages/orca-lang
@@ -77,7 +87,7 @@ Agent framework demo with 4 scenarios: order processing (8-state workflow), mult
 
 ```
 demo-ts  ──depends on──>  runtime-ts     (pnpm workspace:*)
-demo-python  ──depends on──>  runtime-python  (pip editable / PYTHONPATH)
+demo-python  ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
 ```
 
 The orca-lang package is independent — runtimes implement their own parsers and can operate without it.

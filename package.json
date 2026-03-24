@@ -8,6 +8,8 @@
     "test": "pnpm -r run test",
     "test:lang": "pnpm --filter orca run test",
     "test:demo-ts": "pnpm --filter orca-demo-ts run test",
+    "test:demo-python": ".venv/bin/python packages/demo-python/demo.py",
+    "setup:python": "python3 -m venv .venv && .venv/bin/pip install -e packages/runtime-python && .venv/bin/pip install -e packages/demo-python",
     "clean": "pnpm -r exec rm -rf dist"
   },
   "engines": {
