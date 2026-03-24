@@ -703,11 +703,71 @@ Orca's unique position is the combination of full topology verification, complet
 - Action generation with auto-generated unit tests
 - Benchmark: compare LLM success rates for Orca vs. direct XState generation
 
-### Phase 2.5: Orca CLI Skills
+### Phase 2.5: Orca CLI Skills ✅ COMPLETE
+- `/generate-orca` - Natural language → Orca topology
+- `/verify-orca` - Structured JSON verification
+- `/compile-orca` - XState and Mermaid compilation
+- `/generate-actions` - Action scaffold generation with LLM
+- `/refine-orca` - Fix verification errors via LLM
 
-To make Orca adoption seamless for LLMs, the CLI exposes structured skills that wrap verification and compilation. Each skill is designed for LLM consumption with structured output suitable for iterative refinement.
+### Phase 2.7: Effect Runtime
+The effect runtime enables Orca machines to actually execute, not just generate code.
 
-#### Skill: `/generate-orca`
+**Components:**
+- `OrcaMachine` actor class wrapping XState actors
+- Event emitter API: `machine.send(event)`
+- Effect router: `effectRouter.register('EffectType', handler)`
+- Effect handlers: typed functions that execute side effects
+- Effect response mapping: converts external responses back to machine events
+- Context persistence: save/restore machine state
+
+**Runtime API:**
+```typescript
+// Create a machine from compiled Orca
+const machine = createOrcaMachine(compiledConfig, {
+  effectHandlers: {
+    http_post: async (effect) => { /* ... */ },
+    log: async (effect) => { console.log(effect.payload); },
+  },
+  onTransition: (state) => { /* state change hook */ },
+});
+
+// Send events
+await machine.send({ type: 'submit_payment', orderId: '123' });
+
+// Query state
+const state = machine.getState();
+console.log(state.value); // 'authorizing'
+
+// Persist/restore context
+const snapshot = machine.snapshot();
+machine.restore(snapshot);
+```
+
+**Effect Lifecycle:**
+1. Action returns `[Context, Effect<T>]`
+2. Effect router intercepts effect
+3. Handler executes side effect (HTTP, logging, etc.)
+4. Handler returns response
+5. Response is mapped to a machine event via `effect_responses` config
+6. Machine receives mapped event and transitions
+
+### Phase 2.8: Real-World Demo
+Apply Orca to a real codebase to validate the workflow end-to-end.
+
+**Candidate: retro-quest** (text adventure game in `~/code/retro-quest`)
+- Natural fit for state machine representation
+- Demonstrates effect runtime integration with LLM narrative generation
+- Shows Orca handling game logic while LLM handles creative content
+
+**Demo Workflow:**
+1. Describe game in natural language → `/generate-orca`
+2. Verify topology → `/verify-orca`
+3. Generate action implementations → `/generate-actions --use-llm`
+4. Compile to XState + hook up effect runtime
+5. Run with real game loop
+
+### Phase 3: Advanced Features
 Converts a natural language description into an Orca topology.
 
 **Input:** Natural language specification (e.g., "A payment processor that handles retries up to 3 times")
@@ -894,7 +954,7 @@ src/
     └── typescript.ts # TypeScript code generator
 ```
 
-### Phase 3: Advanced Features
+### Phase 3: Advanced Features (post-demo)
 - Hierarchical states and parallel regions
 - Property specification and bounded model checking
 - Additional compilation targets (Python, C, Lean)
