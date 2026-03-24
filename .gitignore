@@ -1,37 +1,8 @@
-# Dependencies
 node_modules/
-
-# Build output
 dist/
-
-# IDE
-.DS_Store
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Environment
 .env
-.env.local
-.env.*.local
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Test
-coverage/
-
-# Misc
-*.tgz
-.cache/
-
-# Generated output
-actions/
-
-# Local config
-orca.yaml
-orca.yaml.example
+*.egg-info/
+__pycache__/
+.venv/
+.next/
+*.tsbuildinfo

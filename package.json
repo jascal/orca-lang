@@ -1,30 +1,17 @@
 {
-  "name": "orca",
+  "name": "orca-monorepo",
   "version": "0.1.0",
-  "description": "Orca (Orchestrated State Machine Language) - an LLM-native code generation target",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "bin": {
-    "orca": "dist/index.js"
-  },
+  "private": true,
+  "description": "Orca (Orchestrated State Machine Language) - monorepo",
   "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "verify": "tsx src/index.ts verify",
-    "compile": "tsx src/index.ts compile"
+    "build": "pnpm -r --filter './packages/orca-lang' --filter './packages/runtime-ts' run build",
+    "test": "pnpm -r run test",
+    "test:lang": "pnpm --filter orca run test",
+    "test:demo-ts": "pnpm --filter orca-demo-ts run test",
+    "clean": "pnpm -r exec rm -rf dist"
   },
-  "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
-    "@types/node": "^20.10.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.0",
-    "vitest": "^4.1.1"
-  },
-  "dependencies": {
-    "dotenv": "^17.3.1",
-    "js-yaml": "^4.1.1",
-    "xstate": "^5.28.0"
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
   }
 }

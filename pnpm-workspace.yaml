@@ -1,0 +1,4 @@
+packages:
+  - 'packages/orca-lang'
+  - 'packages/runtime-ts'
+  - 'packages/demo-ts'
