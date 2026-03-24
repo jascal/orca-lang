@@ -134,7 +134,7 @@ export class Parser {
     return { isInitial, isFinal };
   }
 
-  private parseStateBody(): Omit<StateDef, 'name' | 'isInitial' | 'isFinal'> {
+  private parseStateBody(parentName?: string): Omit<StateDef, 'name' | 'isInitial' | 'isFinal'> {
     const result: Omit<StateDef, 'name' | 'isInitial' | 'isFinal'> = {};
     this.expect('LBRACE');
     while (!this.match('RBRACE')) {
@@ -164,6 +164,16 @@ export class Parser {
         const event = this.expect('IDENT').value;
         if (!result.ignoredEvents) result.ignoredEvents = [];
         result.ignoredEvents.push(event);
+      } else if (this.match('STATE')) {
+        // Nested state block - parse contains
+        // Only parse if we have a parent name (nested inside another state)
+        if (parentName) {
+          this.pos--;  // Back up to parse the nested state properly
+          const nestedStates = this.parseStatesRecursive(parentName);
+          result.contains = nestedStates;
+        } else {
+          throw new Error(`Unexpected nested state at top level at ${this.peek().pos.line}:${this.peek().pos.column}`);
+        }
       } else {
         throw new Error(`Unexpected token in state body: ${this.peek().type} "${this.peek().value}" at ${this.peek().pos.line}:${this.peek().pos.column}`);
       }
@@ -171,13 +181,39 @@ export class Parser {
     return result;
   }
 
+  // Parse nested states with parent name set
+  private parseStatesRecursive(parentName: string): StateDef[] {
+    const states: StateDef[] = [];
+    while (this.match('STATE')) {
+      const name = this.expect('IDENT').value;
+      const { isInitial, isFinal } = this.parseStateAnnotations();
+      const body = this.parseStateBody(name);
+
+      // Validate: compound state cannot be final
+      if (isFinal && body.contains && body.contains.length > 0) {
+        throw new Error(`State "${name}" cannot be both final and contain nested states at ${this.peek(-1).pos.line}:${this.peek(-1).pos.column}`);
+      }
+
+      const state: StateDef = { name, isInitial, isFinal, parent: parentName, ...body };
+      states.push(state);
+    }
+    return states;
+  }
+
   private parseStates(): StateDef[] {
     const states: StateDef[] = [];
     while (this.match('STATE')) {
       const name = this.expect('IDENT').value;
       const { isInitial, isFinal } = this.parseStateAnnotations();
-      const body = this.parseStateBody();
-      states.push({ name, isInitial, isFinal, ...body });
+      const body = this.parseStateBody(name);  // Pass name as parent for nested state handling
+
+      // Validate: compound state cannot be final
+      if (isFinal && body.contains && body.contains.length > 0) {
+        throw new Error(`State "${name}" cannot be both final and contain nested states at ${this.peek(-1).pos.line}:${this.peek(-1).pos.column}`);
+      }
+
+      const state: StateDef = { name, isInitial, isFinal, ...body };
+      states.push(state);
     }
     return states;
   }

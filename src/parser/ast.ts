@@ -91,6 +91,7 @@ export interface StateDef {
     target: string;
   };
   contains?: StateDef[];
+  parent?: string;  // Parent state name for hierarchical states
   transitions?: Transition[];
   ignoredEvents?: string[];
 }

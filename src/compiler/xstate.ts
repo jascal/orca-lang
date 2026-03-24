@@ -1,5 +1,27 @@
 import { MachineDef, Transition, ActionSignature, StateDef } from '../parser/ast.js';
-import { createMachine, assign, fromCallback } from 'xstate';
+import { createMachine, assign } from 'xstate';
+
+// Helper to find a state with a specific action (searches nested states)
+function findStateByAction(machine: MachineDef, actionName: string): StateDef | undefined {
+  for (const state of machine.states) {
+    const found = findStateRecursively(state, actionName);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function findStateRecursively(state: StateDef, actionName: string): StateDef | undefined {
+  if (state.onEntry === actionName || state.onExit === actionName) {
+    return state;
+  }
+  if (state.contains) {
+    for (const child of state.contains) {
+      const found = findStateRecursively(child, actionName);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
 
 export interface CompiledMachine {
   config: any; // XState MachineConfig type
@@ -37,11 +59,10 @@ function findEffectfulActions(machine: MachineDef) {
 
   for (const action of machine.actions) {
     if (action.hasEffect && action.effectType) {
-      // Find which state uses this action
-      for (const state of machine.states) {
-        if (state.onEntry === action.name || state.onExit === action.name) {
-          effectful.push({ name: action.name, effectType: action.effectType, state: state.name });
-        }
+      // Find which state uses this action (search all states including nested)
+      const stateWithAction = findStateByAction(machine, action.name);
+      if (stateWithAction) {
+        effectful.push({ name: action.name, effectType: action.effectType, state: stateWithAction.name });
       }
       // Find transitions using this action
       for (const t of machine.transitions) {
@@ -69,21 +90,43 @@ function buildStates(machine: MachineDef): Record<string, any> {
   const states: Record<string, any> = {};
 
   for (const state of machine.states) {
-    states[state.name] = buildStateConfig(state, machine);
+    states[state.name] = buildStateConfig(state, machine, machine.states);
   }
 
   return states;
 }
 
-function buildStateConfig(state: StateDef, machine: MachineDef): any {
+function buildStateConfig(state: StateDef, machine: MachineDef, allStates: StateDef[]): any {
   const config: any = {};
 
   if (state.description) {
     config.description = state.description;
   }
-  if (state.isInitial) {
-    config.type = 'initial';
+
+  // Check if this is a compound state (has nested states)
+  if (state.contains && state.contains.length > 0) {
+    // Compound state with nested states
+    const initialChild = state.contains.find(s => s.isInitial) || state.contains[0];
+    config.initial = initialChild.name;
+    config.states = {};
+
+    // Handle transitions for compound states (BEFORE recursive calls)
+    // These transitions fire from any child state via XState event bubbling
+    const thisStateTransitions = machine.transitions.filter(t => t.source === state.name);
+    if (thisStateTransitions.length > 0) {
+      config.on = buildTransitions(thisStateTransitions, machine);
+    }
+
+    for (const child of state.contains) {
+      config.states[child.name] = buildStateConfig(child, machine, state.contains);
+    }
+
+    // Compound states don't use type: 'initial' or 'final' - they use initial + nested states
+    return config;
   }
+
+  // Leaf state configuration
+  // Note: initial state is designated by the parent's `initial` property, not by type
   if (state.isFinal) {
     config.type = 'final';
   }
@@ -101,10 +144,12 @@ function buildStateConfig(state: StateDef, machine: MachineDef): any {
     config.exit = state.onExit;
   }
 
-  // Handle transitions
-  const stateTransitions = machine.transitions.filter(t => t.source === state.name);
-  if (stateTransitions.length > 0) {
-    config.on = buildTransitions(stateTransitions, machine);
+  // Handle transitions - only use this state's transitions
+  // (transitions on compound states fire from any child via XState's event bubbling)
+  const thisStateTransitions = machine.transitions.filter(t => t.source === state.name);
+
+  if (thisStateTransitions.length > 0) {
+    config.on = buildTransitions(thisStateTransitions, machine);
   }
 
   // Handle timeout
@@ -117,9 +162,40 @@ function buildStateConfig(state: StateDef, machine: MachineDef): any {
   return config;
 }
 
+// Get transitions from parent compound states (these fire from any child state)
+function getParentTransitions(state: StateDef, machine: MachineDef, allStates: StateDef[]): Transition[] {
+  if (!state.parent) return [];
+
+  // Find parent state
+  const parent = findStateByName(allStates, state.parent);
+  if (!parent) return [];
+
+  // Get parent's transitions
+  const parentTransitions = machine.transitions.filter(t => t.source === parent.name);
+
+  // Recursively get grandparent transitions
+  const grandparentTransitions = getParentTransitions(parent, machine, allStates);
+
+  return [...parentTransitions, ...grandparentTransitions];
+}
+
+// Find a state by name in a flat list of states (including nested)
+function findStateByName(states: StateDef[], name: string): StateDef | undefined {
+  for (const state of states) {
+    if (state.name === name) return state;
+    if (state.contains) {
+      const found = findStateByName(state.contains, name);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
 function buildEffectInvoke(actionName: string, action: ActionSignature, machine: MachineDef): any {
   // Find the state that has this action as entry or exit
-  const stateName = machine.states.find(s => s.onEntry === actionName || s.onExit === actionName)?.name;
+  // Search all states including nested ones
+  const stateWithAction = findStateByAction(machine, actionName);
+  const stateName = stateWithAction?.name;
   let doneTarget: string | undefined;
 
   // Find transitions from this state to determine the completion target.
@@ -140,8 +216,13 @@ function buildEffectInvoke(actionName: string, action: ActionSignature, machine:
   // Build the input expression - it will be used in the fromPromise
   const inputExpr = ({ context, event }: { context: any; event: any }) => ({ context, event, action: actionName });
 
+  // Find an error/failed state if one exists
+  const errorState = machine.states.find(s => s.name === 'error')
+    || machine.states.find(s => s.name === 'failed');
+  const errorTarget = errorState?.name;
+
   // Return the invoke config directly, not wrapped in another object.
-  return {
+  const invokeConfig: any = {
     src: `__effect__:${effectType}`,
     input: inputExpr,
     onDone: doneTarget ? {
@@ -155,12 +236,17 @@ function buildEffectInvoke(actionName: string, action: ActionSignature, machine:
       }),
     },
     onError: {
-      target: 'error',
       actions: assign({
         _effectError: ({ event }: any) => event.error?.message,
       }),
     },
   };
+
+  if (errorTarget) {
+    invokeConfig.onError.target = errorTarget;
+  }
+
+  return invokeConfig;
 }
 
 function buildTransitions(transitions: Transition[], machine: MachineDef): Record<string, any> {
@@ -246,9 +332,30 @@ export function compileToXState(machine: MachineDef): string {
     if (state.description) {
       lines.push(`      description: '${escapeString(state.description)}',`);
     }
-    if (state.isInitial) {
-      lines.push(`      type: 'initial',`);
+
+    // Check if this is a compound state (has nested states)
+    if (state.contains && state.contains.length > 0) {
+      // Compound state with nested states
+      const initialChild = state.contains.find(s => s.isInitial) || state.contains[0];
+      lines.push(`      initial: '${initialChild.name}',`);
+      lines.push(`      states: {`);
+      for (let j = 0; j < state.contains.length; j++) {
+        const child = state.contains[j];
+        lines.push(`        ${child.name}: {`);
+        if (child.description) {
+          lines.push(`          description: '${escapeString(child.description)}',`);
+        }
+        if (child.isFinal) {
+          lines.push(`          type: 'final',`);
+        }
+        lines.push(`        }${j < state.contains.length - 1 ? ',' : ''}`);
+      }
+      lines.push(`      },`);
+      lines.push(`    }${i < machine.states.length - 1 ? ',' : ''}`);
+      continue;
     }
+
+    // Leaf state configuration
     if (state.isFinal) {
       lines.push(`      type: 'final',`);
     }
@@ -339,8 +446,17 @@ function getDefaultForType(field: { type: { kind: string } }): string {
 }
 
 function getInitialState(machine: MachineDef): string {
+  // Find top-level initial state (not nested)
   const initial = machine.states.find(s => s.isInitial);
-  return initial?.name || machine.states[0]?.name || 'unknown';
+  if (initial) {
+    // If initial is compound, return its initial child
+    if (initial.contains && initial.contains.length > 0) {
+      const initialChild = initial.contains.find(s => s.isInitial) || initial.contains[0];
+      return initial.name;  // XState will enter the compound state and use its initial
+    }
+    return initial.name;
+  }
+  return machine.states[0]?.name || 'unknown';
 }
 
 function groupByEvent(transitions: Transition[]): Record<string, Transition[]> {
