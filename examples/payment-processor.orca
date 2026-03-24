@@ -28,13 +28,11 @@ state idle [initial] {
 state validating {
   description: "Validating payment details before authorization"
   on_entry: -> validate_payment_details
-  timeout: 5s -> validation_timeout
 }
 
 state authorizing {
   description: "Waiting for payment gateway response"
   on_entry: -> send_authorization_request
-  timeout: 30s -> payment_timeout
 }
 
 state authorized {

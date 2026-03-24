@@ -169,7 +169,7 @@ function buildTransitions(transitions: Transition[], machine: MachineDef): Recor
       // Multiple transitions or guarded - use array format
       on[eventName] = trans.map(t => {
         const action = machine.actions.find(a => a.name === t.action);
-        const target = t.guard ? `#${t.target}` : t.target;
+        const target = t.target;
 
         const transition: any = { target };
         if (t.guard) {
@@ -251,7 +251,7 @@ export function compileToXState(machine: MachineDef): string {
           lines.push(`        ${eventName}: [`);
           for (const t of trans) {
             lines.push(`          {`);
-            const target = t.guard ? `#${t.target}` : t.target;
+            const target = t.target;
             lines.push(`            target: '${target}',`);
             if (t.guard) {
               const guardName = t.guard.negated ? `!${t.guard.name}` : t.guard.name;
