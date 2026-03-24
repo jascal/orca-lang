@@ -21,9 +21,19 @@ import { parse } from './parser/parser.js';
 import { checkStructural } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
-import { compileToXState } from './compiler/xstate.js';
+import { compileToXState, compileToXStateMachine } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { verifySkill, compileSkill, generateActionsSkill, refineSkill, generateOrcaSkill } from './skills.js';
+import { createOrcaMachine } from './runtime/machine.js';
+import type { OrcaMachine, OrcaMachineOptions, OrcaState } from './runtime/types.js';
+
+// Re-export for use as a library
+export { tokenize } from './parser/lexer.js';
+export { parse } from './parser/parser.js';
+export { compileToXState, compileToXStateMachine } from './compiler/xstate.js';
+export { compileToMermaid } from './compiler/mermaid.js';
+export { createOrcaMachine };
+export type { OrcaMachine, OrcaMachineOptions, OrcaState, EffectHandlers, EffectResult, Effect } from './runtime/types.js';
 
 async function login(provider: string, profileId: string = 'default'): Promise<void> {
   console.log(`Logging in to ${provider}...`);
@@ -472,4 +482,10 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+// Only run main() when this file is executed directly (not imported as a module)
+// In ESM, we check if this module is the main entry point
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] && process.argv[1].endsWith(__filename)) {
+  main();
+}

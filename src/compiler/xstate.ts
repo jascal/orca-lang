@@ -90,8 +90,9 @@ function buildStateConfig(state: StateDef, machine: MachineDef): any {
   if (state.onEntry) {
     const action = machine.actions.find(a => a.name === state.onEntry);
     if (action?.hasEffect) {
-      // Effectful action - handled via invoke
-      config.entry = buildEffectInvoke(state.onEntry, action, 'entry');
+      // Effectful action - use invoke at state level to run the effect
+      // Don't set entry - the invoke replaces the entry action
+      config.invoke = buildEffectInvoke(state.onEntry, action, machine);
     } else {
       config.entry = state.onEntry;
     }
@@ -116,25 +117,48 @@ function buildStateConfig(state: StateDef, machine: MachineDef): any {
   return config;
 }
 
-function buildEffectInvoke(actionName: string, action: ActionSignature, usage: 'entry' | 'exit' | 'transition'): any {
-  // For effectful actions, we create an invoke that calls the effect handler
-  // The actual handler wiring happens at runtime
+function buildEffectInvoke(actionName: string, action: ActionSignature, machine: MachineDef): any {
+  // Find the state that has this action as entry or exit
+  const stateName = machine.states.find(s => s.onEntry === actionName || s.onExit === actionName)?.name;
+  let doneTarget: string | undefined;
+
+  // Find transitions from this state to determine the completion target.
+  // When an effect is invoked, the machine waits for the effect to complete.
+  // The completion event is derived from transitions that exit this state.
+  if (stateName) {
+    // Look for transitions that exit this state (these handle effect completion)
+    const exitTransitions = machine.transitions.filter(t => t.source === stateName);
+    if (exitTransitions.length > 0) {
+      // Use the first exit transition's target as the done target.
+      // This assumes effects have a simple completion path.
+      doneTarget = exitTransitions[0].target;
+    }
+  }
+
+  const effectType = action.effectType || 'Effect';
+
+  // Build the input expression - it will be used in the fromPromise
+  const inputExpr = ({ context, event }: { context: any; event: any }) => ({ context, event, action: actionName });
+
+  // Return the invoke config directly, not wrapped in another object.
   return {
-    invoke: {
-      src: `effect:${action.effectType}`,
-      input: ({ context, event }: { context: any; event: any }) => ({ context, event, action: actionName, usage }),
-      onDone: {
-        target: 'authorized', // This gets resolved at runtime based on transition
-        actions: assign({
-          _effectResult: ({ event }: any) => event.output,
-        }),
-      },
-      onError: {
-        target: 'declined',
-        actions: assign({
-          _effectError: ({ event }: any) => event.error?.message,
-        }),
-      },
+    src: `__effect__:${effectType}`,
+    input: inputExpr,
+    onDone: doneTarget ? {
+      target: doneTarget,
+      actions: assign({
+        _effectResult: ({ event }: any) => event.output,
+      }),
+    } : {
+      actions: assign({
+        _effectResult: ({ event }: any) => event.output,
+      }),
+    },
+    onError: {
+      target: 'error',
+      actions: assign({
+        _effectError: ({ event }: any) => event.error?.message,
+      }),
     },
   };
 }

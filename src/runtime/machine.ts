@@ -1,12 +1,12 @@
 // Orca Machine Runtime - creates executable state machines
 
-import { createActor, createMachine, fromCallback } from 'xstate';
+import { createActor, createMachine, fromPromise } from 'xstate';
+import { assign } from 'xstate';
 import type { Actor } from 'xstate';
 import { compileToXStateMachine, CompiledMachine } from '../compiler/xstate.js';
 import { MachineDef } from '../parser/ast.js';
 import {
   EffectHandlers,
-  EffectResponseMapping,
   OrcaMachineOptions,
   OrcaState,
   OrcaSnapshot,
@@ -25,22 +25,18 @@ export function createOrcaMachine(
   let machineDef: MachineDef;
 
   if ('effectMeta' in machineOrDef) {
-    // Already compiled
     compiled = machineOrDef;
-    machineDef = {} as MachineDef; // Not needed for runtime
+    machineDef = {} as MachineDef;
   } else {
     machineDef = machineOrDef;
     compiled = compileToXStateMachine(machineDef);
   }
 
-  // Build effect services from handlers
-  const services = buildEffectServices(compiled.effectMeta.effectfulActions, options.effectHandlers);
+  // Preprocess the config to inline fromPromise for effect invocations
+  const config = preprocessEffectInvokes(compiled.config, compiled.effectMeta.effectfulActions, options.effectHandlers);
 
-  // Create the XState machine with services
-  const machine = createMachine({
-    ...compiled.config,
-    services,
-  });
+  // Create the XState machine
+  const machine = createMachine(config);
 
   // Create and start the actor
   const actor = createActor(machine);
@@ -59,37 +55,79 @@ export function createOrcaMachine(
   return new OrcaMachineImpl(actor, options);
 }
 
-function buildEffectServices(
+/**
+ * Preprocess the machine config to replace __effect__:type references
+ * with actual fromPromise inline invocations.
+ */
+function preprocessEffectInvokes(
+  config: any,
   effectfulActions: CompiledMachine['effectMeta']['effectfulActions'],
   handlers: EffectHandlers
-): Record<string, any> {
-  const services: Record<string, any> = {};
-
+): any {
+  // Build a map of effectType -> handler
+  const handlerMap = new Map<string, any>();
   for (const action of effectfulActions) {
     const handler = handlers[action.effectType];
-    if (handler) {
-      services[`effect:${action.effectType}`] = fromCallback(({ sendBack, input }: any) => {
-        const effect: Effect = {
-          type: action.effectType,
-          payload: input,
-        };
-
-        Promise.resolve(handler(effect)).then((result) => {
-          if (result.status === 'success') {
-            sendBack({ type: 'EFFECT_SUCCESS', output: result.data });
-          } else if (result.status === 'failure') {
-            sendBack({ type: 'EFFECT_FAILURE', error: result.error });
-          } else if (result.status === 'timeout') {
-            sendBack({ type: 'EFFECT_TIMEOUT' });
-          }
-        }).catch((error) => {
-          sendBack({ type: 'EFFECT_FAILURE', error: error.message });
-        });
-      });
+    if (handler && typeof handler === 'function') {
+      handlerMap.set(action.effectType, { handler, action });
     }
   }
 
-  return services;
+  // Deep clone the config preserving functions
+  const processedConfig = deepCloneWithInvokeReplacement(config, handlerMap);
+
+  return processedConfig;
+}
+
+/**
+ * Deep clone config while replacing __effect__:type invoke src with fromPromise.
+ * Preserves functions (unlike JSON serialization).
+ */
+function deepCloneWithInvokeReplacement(obj: any, handlerMap: Map<string, any>): any {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => deepCloneWithInvokeReplacement(item, handlerMap));
+  }
+
+  // Check if this is an invoke object with __effect__:type src
+  if ('src' in obj && typeof obj.src === 'string' && obj.src.startsWith('__effect__:')) {
+    const effectType = obj.src.replace('__effect__:', '');
+    const entryHandler = handlerMap.get(effectType);
+
+    if (entryHandler) {
+      // Create new invoke object with fromPromise replacing the string src
+      const newObj: any = { ...obj };
+      newObj.src = fromPromise(async ({ input }: { input: any }) => {
+        const effect: Effect = {
+          type: effectType,
+          payload: input,
+        };
+        try {
+          const result = await Promise.resolve(entryHandler.handler(effect));
+          return result;
+        } catch (err) {
+          throw err;
+        }
+      });
+      // Clone other properties recursively
+      for (const key of Object.keys(obj)) {
+        if (key !== 'src') {
+          newObj[key] = deepCloneWithInvokeReplacement(obj[key], handlerMap);
+        }
+      }
+      return newObj;
+    }
+  }
+
+  // Regular object - clone all properties
+  const newObj: any = {};
+  for (const key of Object.keys(obj)) {
+    newObj[key] = deepCloneWithInvokeReplacement(obj[key], handlerMap);
+  }
+  return newObj;
 }
 
 class OrcaMachineImpl implements OrcaMachine {
@@ -130,8 +168,6 @@ class OrcaMachineImpl implements OrcaMachine {
   }
 
   restore(_snapshot: OrcaSnapshot): void {
-    // XState actors don't directly support restore
-    // The machine must be re-created with the snapshot's context
     throw new Error('restore() is not yet implemented. Use initial context to re-create machine state.');
   }
 }
