@@ -21,12 +21,25 @@ from .types import (
     EffectResult,
     EffectStatus,
     ActionSignature,
+    GuardExpression,
+    GuardTrue,
+    GuardFalse,
+    GuardCompare,
+    GuardAnd,
+    GuardOr,
+    GuardNot,
+    GuardNullcheck,
+    VariableRef,
+    ValueRef,
 )
 from .bus import EventBus, Event, EventType, get_event_bus
 
 
 # Type alias for transition callback
 TransitionCallback = Callable[[StateValue, StateValue], Awaitable[None]]
+
+# Action handler: (context, event_payload?) -> context_updates or None
+ActionHandler = Callable[..., Any]  # async (dict, dict|None) -> dict|None
 
 
 @dataclass
@@ -75,6 +88,8 @@ class OrcaMachine:
         # Internal state
         self._state: StateValue = StateValue(self._get_initial_state())
         self._active: bool = False
+        self._action_handlers: dict[str, ActionHandler] = {}
+        self._timeout_task: asyncio.Task | None = None
 
     def _get_initial_state(self) -> str:
         """Find the initial state name."""
@@ -96,6 +111,14 @@ class OrcaMachine:
         """Whether the machine is running."""
         return self._active
 
+    def register_action(self, name: str, handler: ActionHandler) -> None:
+        """Register a handler for a plain (non-effect) action."""
+        self._action_handlers[name] = handler
+
+    def unregister_action(self, name: str) -> None:
+        """Unregister an action handler."""
+        self._action_handlers.pop(name, None)
+
     async def start(self) -> None:
         """Start the state machine and execute initial state's on_entry."""
         if self._active:
@@ -115,11 +138,15 @@ class OrcaMachine:
         # Execute entry actions for initial state
         await self._execute_entry_actions(self._state.leaf())
 
+        # Start timeout for initial state if defined
+        self._start_timeout_for_state(self._state.leaf())
+
     async def stop(self) -> None:
         """Stop the state machine."""
         if not self._active:
             return
 
+        self._cancel_timeout()
         self._active = False
 
         await self.event_bus.publish(Event(
@@ -186,12 +213,15 @@ class OrcaMachine:
         old_state = StateValue(self._state.value)
         new_state_name = transition.target
 
+        # Cancel any active timeout from the old state
+        self._cancel_timeout()
+
         # Execute exit actions
         await self._execute_exit_actions(old_state.leaf())
 
         # Execute transition action
         if transition.action:
-            await self._execute_action(transition.action)
+            await self._execute_action(transition.action, evt.payload)
 
         # Update state
         if self._is_compound_state(new_state_name):
@@ -214,6 +244,9 @@ class OrcaMachine:
 
         # Execute entry actions for new state
         await self._execute_entry_actions(new_state_name)
+
+        # Start timeout for new state if defined
+        self._start_timeout_for_state(self._state.leaf())
 
         # Notify callback
         if self.on_transition:
@@ -327,24 +360,76 @@ class OrcaMachine:
         guard_expr = self.definition.guards[guard_name]
         return await self._eval_guard(guard_expr)
 
-    async def _eval_guard(self, expr) -> bool:
-        """Evaluate a guard expression."""
-        # Handle different expression types
-        if hasattr(expr, "kind"):
-            kind = expr.kind
-        elif hasattr(expr, "__class__"):
-            kind = expr.__class__.__name__
-        else:
+    async def _eval_guard(self, expr: GuardExpression) -> bool:
+        """Evaluate a guard expression against the machine context."""
+        if isinstance(expr, GuardTrue):
             return True
-
-        if kind == "true" or isinstance(expr, type(None)) and expr is None:
-            return True
-        if kind == "false":
+        if isinstance(expr, GuardFalse):
             return False
-
-        # For now, simplified guard evaluation
-        # Full implementation would evaluate comparisons and boolean expressions
+        if isinstance(expr, GuardNot):
+            return not await self._eval_guard(expr.expr)
+        if isinstance(expr, GuardAnd):
+            return await self._eval_guard(expr.left) and await self._eval_guard(expr.right)
+        if isinstance(expr, GuardOr):
+            return await self._eval_guard(expr.left) or await self._eval_guard(expr.right)
+        if isinstance(expr, GuardCompare):
+            return self._eval_compare(expr.op, expr.left, expr.right)
+        if isinstance(expr, GuardNullcheck):
+            return self._eval_nullcheck(expr.expr, expr.is_null)
         return True
+
+    def _resolve_variable(self, ref: VariableRef) -> Any:
+        """Resolve a variable path against the machine context."""
+        current: Any = self.context
+        for part in ref.path:
+            # Skip "ctx" or "context" prefix — context is already the root
+            if part in ("ctx", "context"):
+                continue
+            if current is None:
+                return None
+            if isinstance(current, dict):
+                current = current.get(part)
+            else:
+                current = getattr(current, part, None)
+        return current
+
+    def _resolve_value(self, ref: ValueRef) -> Any:
+        """Resolve a ValueRef to its Python value."""
+        return ref.value
+
+    def _eval_compare(self, op: str, left: VariableRef, right: ValueRef) -> bool:
+        """Evaluate a comparison guard."""
+        lhs = self._resolve_variable(left)
+        rhs = self._resolve_value(right)
+
+        # Try numeric comparison
+        try:
+            lnum = float(lhs) if not isinstance(lhs, (int, float)) else lhs
+            rnum = float(rhs) if not isinstance(rhs, (int, float)) else rhs
+            both_numeric = True
+        except (TypeError, ValueError):
+            both_numeric = False
+            lnum = rnum = 0
+
+        if op == "eq":
+            return lhs == rhs
+        if op == "ne":
+            return lhs != rhs
+        if op == "lt":
+            return lnum < rnum if both_numeric else str(lhs) < str(rhs)
+        if op == "gt":
+            return lnum > rnum if both_numeric else str(lhs) > str(rhs)
+        if op == "le":
+            return lnum <= rnum if both_numeric else str(lhs) <= str(rhs)
+        if op == "ge":
+            return lnum >= rnum if both_numeric else str(lhs) >= str(rhs)
+        return False
+
+    def _eval_nullcheck(self, expr: VariableRef, is_null: bool) -> bool:
+        """Evaluate a null check guard."""
+        val = self._resolve_variable(expr)
+        value_is_null = val is None
+        return value_is_null if is_null else not value_is_null
 
     async def _execute_entry_actions(self, state_name: str) -> None:
         """Execute on_entry action for a state."""
@@ -398,11 +483,81 @@ class OrcaMachine:
             return
         await self._execute_action(state_def.on_exit)
 
-    async def _execute_action(self, action_name: str) -> None:
-        """Execute a non-effect action."""
-        # For actions without effects, just update context if needed
-        # Full implementation would call user-defined action function
-        pass
+    async def _execute_action(self, action_name: str, event_payload: dict[str, Any] | None = None) -> None:
+        """Execute a non-effect action via registered handler."""
+        handler = self._action_handlers.get(action_name)
+        if handler is None:
+            return  # No handler registered — skip silently
+
+        result = handler(self.context, event_payload)
+        # Support both sync and async handlers
+        if asyncio.iscoroutine(result) or asyncio.isfuture(result):
+            result = await result
+        if result and isinstance(result, dict):
+            self.context.update(result)
+
+    def _start_timeout_for_state(self, state_name: str) -> None:
+        """Start a timeout timer for the given state if it has one."""
+        state_def = self._find_state_def(state_name)
+        if not state_def or not state_def.timeout:
+            return
+
+        duration_s = int(state_def.timeout["duration"])
+        target = state_def.timeout["target"]
+
+        async def _timeout_handler():
+            await asyncio.sleep(duration_s)
+            if self._active and self._state.leaf() == state_name:
+                await self._execute_timeout_transition(state_name, target)
+
+        self._timeout_task = asyncio.create_task(_timeout_handler())
+
+    def _cancel_timeout(self) -> None:
+        """Cancel any active timeout timer."""
+        if self._timeout_task is not None:
+            self._timeout_task.cancel()
+            self._timeout_task = None
+
+    async def _execute_timeout_transition(self, from_state: str, target: str) -> None:
+        """Execute an automatic timeout transition."""
+        old_state = StateValue(self._state.value)
+
+        # Execute exit actions
+        await self._execute_exit_actions(from_state)
+
+        # Update state
+        if self._is_compound_state(target):
+            initial_child = self._get_initial_child(target)
+            self._state = StateValue({target: {initial_child: {}}})
+        else:
+            self._state = StateValue(target)
+
+        await self.event_bus.publish(Event(
+            type=EventType.TRANSITION_STARTED,
+            source=self.definition.name,
+            payload={
+                "from": str(old_state),
+                "to": target,
+                "trigger": "timeout",
+            }
+        ))
+
+        await self._execute_entry_actions(target)
+
+        # Start timeout for the new state
+        self._start_timeout_for_state(self._state.leaf())
+
+        if self.on_transition:
+            await self.on_transition(old_state, self._state)
+
+        await self.event_bus.publish(Event(
+            type=EventType.TRANSITION_COMPLETED,
+            source=self.definition.name,
+            payload={
+                "from": str(old_state),
+                "to": str(self._state),
+            }
+        ))
 
     def _find_state_def(self, state_name: str) -> StateDef | None:
         """Find state definition by name (including nested)."""

@@ -20,6 +20,13 @@ from .types import (
     GuardExpression,
     GuardTrue,
     GuardFalse,
+    GuardCompare,
+    GuardAnd,
+    GuardOr,
+    GuardNot,
+    GuardNullcheck,
+    VariableRef,
+    ValueRef,
 )
 
 
@@ -432,15 +439,235 @@ def _parse_guards(content: str) -> dict[str, GuardExpression]:
         if match:
             name = match.group(1)
             expr_str = match.group(2).strip()
-
-            if expr_str == "true":
-                guards[name] = GuardTrue()
-            elif expr_str == "false":
-                guards[name] = GuardFalse()
-            else:
-                guards[name] = GuardTrue()
+            guards[name] = _parse_guard_expression(expr_str)
 
     return guards
+
+
+# --- Guard expression parser ---
+# Grammar:
+#   expr     = or_expr
+#   or_expr  = and_expr ('or' and_expr)*
+#   and_expr = not_expr ('and' not_expr)*
+#   not_expr = 'not' primary | primary
+#   primary  = '(' expr ')' | 'true' | 'false' | comparison
+#   comparison = var_path (op value)?
+#   var_path = IDENT ('.' IDENT)*
+#   op       = '==' | '!=' | '<' | '>' | '<=' | '>='
+#   value    = NUMBER | STRING | 'true' | 'false' | 'null'
+
+@dataclass
+class _GToken:
+    type: str  # ident, number, string, op, lparen, rparen, dot, eof
+    value: str
+
+
+def _tokenize_guard(input_str: str) -> list[_GToken]:
+    """Tokenize a guard expression string."""
+    tokens: list[_GToken] = []
+    i = 0
+    n = len(input_str)
+
+    while i < n:
+        c = input_str[i]
+
+        # Skip whitespace
+        if c.isspace():
+            i += 1
+            continue
+
+        # String literal
+        if c in ('"', "'"):
+            quote = c
+            s = ""
+            i += 1
+            while i < n and input_str[i] != quote:
+                s += input_str[i]
+                i += 1
+            i += 1  # skip closing quote
+            tokens.append(_GToken("string", s))
+            continue
+
+        # Two-char operators
+        if i + 1 < n:
+            two = input_str[i:i + 2]
+            if two in ("==", "!=", "<=", ">="):
+                tokens.append(_GToken("op", two))
+                i += 2
+                continue
+
+        # Single-char operators
+        if c in ("<", ">"):
+            tokens.append(_GToken("op", c))
+            i += 1
+            continue
+
+        if c == "(":
+            tokens.append(_GToken("lparen", "("))
+            i += 1
+            continue
+        if c == ")":
+            tokens.append(_GToken("rparen", ")"))
+            i += 1
+            continue
+        if c == ".":
+            tokens.append(_GToken("dot", "."))
+            i += 1
+            continue
+
+        # Number (including negative)
+        if c.isdigit() or (c == "-" and i + 1 < n and input_str[i + 1].isdigit()):
+            num = c
+            i += 1
+            while i < n and (input_str[i].isdigit() or input_str[i] == "."):
+                num += input_str[i]
+                i += 1
+            tokens.append(_GToken("number", num))
+            continue
+
+        # Identifier
+        if c.isalpha() or c == "_":
+            ident = ""
+            while i < n and (input_str[i].isalnum() or input_str[i] == "_"):
+                ident += input_str[i]
+                i += 1
+            tokens.append(_GToken("ident", ident))
+            continue
+
+        # Skip unknown
+        i += 1
+
+    tokens.append(_GToken("eof", ""))
+    return tokens
+
+
+def _parse_guard_expression(input_str: str) -> GuardExpression:
+    """Parse a guard expression string into a GuardExpression AST."""
+    tokens = _tokenize_guard(input_str)
+    pos = [0]  # mutable ref for nested functions
+
+    def peek() -> _GToken:
+        return tokens[pos[0]]
+
+    def advance() -> _GToken:
+        tok = tokens[pos[0]]
+        pos[0] += 1
+        return tok
+
+    def parse_or() -> GuardExpression:
+        left = parse_and()
+        while peek().type == "ident" and peek().value == "or":
+            advance()
+            right = parse_and()
+            left = GuardOr(left=left, right=right)
+        return left
+
+    def parse_and() -> GuardExpression:
+        left = parse_not()
+        while peek().type == "ident" and peek().value == "and":
+            advance()
+            right = parse_not()
+            left = GuardAnd(left=left, right=right)
+        return left
+
+    def parse_not() -> GuardExpression:
+        if peek().type == "ident" and peek().value == "not":
+            advance()
+            return GuardNot(expr=parse_primary())
+        return parse_primary()
+
+    def parse_primary() -> GuardExpression:
+        tok = peek()
+
+        # Parenthesized expression
+        if tok.type == "lparen":
+            advance()
+            expr = parse_or()
+            if peek().type == "rparen":
+                advance()
+            return expr
+
+        # Literals
+        if tok.type == "ident" and tok.value == "true":
+            advance()
+            return GuardTrue()
+        if tok.type == "ident" and tok.value == "false":
+            advance()
+            return GuardFalse()
+
+        # Variable path, possibly followed by comparison
+        var_path = parse_var_path()
+
+        # Check for "is null" / "is not null"
+        if peek().type == "ident" and peek().value == "is":
+            advance()
+            if peek().type == "ident" and peek().value == "not":
+                advance()
+                if peek().type == "ident" and peek().value == "null":
+                    advance()
+                return GuardNullcheck(expr=var_path, is_null=False)
+            if peek().type == "ident" and peek().value == "null":
+                advance()
+                return GuardNullcheck(expr=var_path, is_null=True)
+
+        # Comparison operator
+        if peek().type == "op":
+            op = advance().value
+            right = parse_value()
+            # Special case: != null and == null
+            if right.type == "null":
+                return GuardNullcheck(expr=var_path, is_null=(op == "=="))
+            return GuardCompare(op=_map_op(op), left=var_path, right=right)
+
+        # Bare variable = truthy check (not null)
+        return GuardNullcheck(expr=var_path, is_null=False)
+
+    def parse_var_path() -> VariableRef:
+        parts: list[str] = []
+        if peek().type == "ident":
+            parts.append(advance().value)
+            while peek().type == "dot":
+                advance()
+                if peek().type == "ident":
+                    parts.append(advance().value)
+        return VariableRef(path=parts)
+
+    def parse_value() -> ValueRef:
+        tok = peek()
+        if tok.type == "number":
+            advance()
+            num = float(tok.value)
+            if num == int(num):
+                num = int(num)
+            return ValueRef(type="number", value=num)
+        if tok.type == "string":
+            advance()
+            return ValueRef(type="string", value=tok.value)
+        if tok.type == "ident":
+            advance()
+            if tok.value == "null":
+                return ValueRef(type="null", value=None)
+            if tok.value == "true":
+                return ValueRef(type="boolean", value=True)
+            if tok.value == "false":
+                return ValueRef(type="boolean", value=False)
+            return ValueRef(type="string", value=tok.value)
+        advance()
+        return ValueRef(type="null", value=None)
+
+    return parse_or()
+
+
+def _map_op(op: str) -> str:
+    """Map operator string to internal op name."""
+    return {
+        "==": "eq",
+        "!=": "ne",
+        "<": "lt",
+        ">": "gt",
+        "<=": "le",
+        ">=": "ge",
+    }.get(op, "eq")
 
 
 def _parse_actions(content: str) -> list[ActionSignature]:

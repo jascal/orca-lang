@@ -30,7 +30,7 @@ export { createEffectRouter } from "./effects.js";
 
 // Machine
 export { OrcaMachine } from "./machine.js";
-export type { TransitionCallback, TransitionResult } from "./machine.js";
+export type { TransitionCallback, TransitionResult, ActionHandler } from "./machine.js";
 
 // Parser
 export { parseOrca, ParseError } from "./parser.js";

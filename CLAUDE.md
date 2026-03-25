@@ -93,7 +93,5 @@ demo-python  ──depends on──>  runtime-python  (pip install -e, declared 
 The orca-lang package is independent — runtimes implement their own parsers and can operate without it.
 
 ## Known Shared Gaps in Both Runtimes
-- Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) is stubbed — always returns true
-- Plain (non-effect) action execution is a no-op — only effect-based actions trigger handlers
-- Timeout transitions are parsed but not enforced at runtime
-- Test coverage is minimal in both runtimes
+- Ignored events are parsed but never checked during dispatch
+- Determinism verifier only checks simple negation pairs, not complex guard expressions

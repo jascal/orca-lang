@@ -10,6 +10,8 @@ import type {
   StateDef,
   Transition,
   GuardExpression,
+  VariableRef,
+  ValueRef,
 } from "./types.js";
 import { StateValue } from "./types.js";
 
@@ -466,19 +468,262 @@ function parseGuards(content: string): Record<string, GuardExpression> {
     const match = trimmed.match(/^(\w+)\s*:\s*(.+)$/);
     if (match) {
       const [, name, exprStr] = match;
-      const stripped = exprStr.trim();
-
-      if (stripped === "true") {
-        guards[name] = { kind: "true" };
-      } else if (stripped === "false") {
-        guards[name] = { kind: "false" };
-      } else {
-        guards[name] = { kind: "true" }; // Default to true for complex expressions
-      }
+      guards[name] = parseGuardExpression(exprStr.trim());
     }
   }
 
   return guards;
+}
+
+// --- Guard expression parser ---
+// Grammar:
+//   expr     = or_expr
+//   or_expr  = and_expr ('or' and_expr)*
+//   and_expr = not_expr ('and' not_expr)*
+//   not_expr = 'not' primary | primary
+//   primary  = '(' expr ')' | 'true' | 'false' | comparison
+//   comparison = var_path (op value)?
+//   var_path = IDENT ('.' IDENT)*
+//   op       = '==' | '!=' | '<' | '>' | '<=' | '>='
+//   value    = NUMBER | STRING | 'true' | 'false' | 'null'
+
+interface GuardToken {
+  type: "ident" | "number" | "string" | "op" | "lparen" | "rparen" | "dot" | "eof";
+  value: string;
+}
+
+function tokenizeGuardExpr(input: string): GuardToken[] {
+  const tokens: GuardToken[] = [];
+  let i = 0;
+
+  while (i < input.length) {
+    // Skip whitespace
+    if (/\s/.test(input[i])) {
+      i++;
+      continue;
+    }
+
+    // String literal
+    if (input[i] === '"' || input[i] === "'") {
+      const quote = input[i];
+      let str = "";
+      i++;
+      while (i < input.length && input[i] !== quote) {
+        str += input[i];
+        i++;
+      }
+      i++; // skip closing quote
+      tokens.push({ type: "string", value: str });
+      continue;
+    }
+
+    // Two-char operators
+    if (i + 1 < input.length) {
+      const two = input[i] + input[i + 1];
+      if (two === "==" || two === "!=" || two === "<=" || two === ">=") {
+        tokens.push({ type: "op", value: two });
+        i += 2;
+        continue;
+      }
+    }
+
+    // Single-char operators
+    if (input[i] === "<" || input[i] === ">") {
+      tokens.push({ type: "op", value: input[i] });
+      i++;
+      continue;
+    }
+
+    if (input[i] === "(") {
+      tokens.push({ type: "lparen", value: "(" });
+      i++;
+      continue;
+    }
+    if (input[i] === ")") {
+      tokens.push({ type: "rparen", value: ")" });
+      i++;
+      continue;
+    }
+    if (input[i] === ".") {
+      tokens.push({ type: "dot", value: "." });
+      i++;
+      continue;
+    }
+
+    // Number
+    if (/\d/.test(input[i]) || (input[i] === "-" && i + 1 < input.length && /\d/.test(input[i + 1]))) {
+      let num = input[i];
+      i++;
+      while (i < input.length && (/\d/.test(input[i]) || input[i] === ".")) {
+        num += input[i];
+        i++;
+      }
+      tokens.push({ type: "number", value: num });
+      continue;
+    }
+
+    // Identifier (includes keywords: true, false, null, and, or, not)
+    if (/[a-zA-Z_]/.test(input[i])) {
+      let ident = "";
+      while (i < input.length && /[a-zA-Z0-9_]/.test(input[i])) {
+        ident += input[i];
+        i++;
+      }
+      tokens.push({ type: "ident", value: ident });
+      continue;
+    }
+
+    // Skip unknown characters
+    i++;
+  }
+
+  tokens.push({ type: "eof", value: "" });
+  return tokens;
+}
+
+function parseGuardExpression(input: string): GuardExpression {
+  const tokens = tokenizeGuardExpr(input);
+  let pos = 0;
+
+  function peek(): GuardToken {
+    return tokens[pos];
+  }
+
+  function advance(): GuardToken {
+    return tokens[pos++];
+  }
+
+  function parseOr(): GuardExpression {
+    let left = parseAnd();
+    while (peek().type === "ident" && peek().value === "or") {
+      advance();
+      const right = parseAnd();
+      left = { kind: "or", left, right };
+    }
+    return left;
+  }
+
+  function parseAnd(): GuardExpression {
+    let left = parseNot();
+    while (peek().type === "ident" && peek().value === "and") {
+      advance();
+      const right = parseNot();
+      left = { kind: "and", left, right };
+    }
+    return left;
+  }
+
+  function parseNot(): GuardExpression {
+    if (peek().type === "ident" && peek().value === "not") {
+      advance();
+      return { kind: "not", expr: parsePrimary() };
+    }
+    return parsePrimary();
+  }
+
+  function parsePrimary(): GuardExpression {
+    const tok = peek();
+
+    // Parenthesized expression
+    if (tok.type === "lparen") {
+      advance();
+      const expr = parseOr();
+      if (peek().type === "rparen") advance();
+      return expr;
+    }
+
+    // Literals
+    if (tok.type === "ident" && tok.value === "true") {
+      advance();
+      return { kind: "true" };
+    }
+    if (tok.type === "ident" && tok.value === "false") {
+      advance();
+      return { kind: "false" };
+    }
+
+    // Variable path, possibly followed by comparison
+    const varPath = parseVarPath();
+
+    // Check for "is null" / "is not null"
+    if (peek().type === "ident" && peek().value === "is") {
+      advance();
+      if (peek().type === "ident" && peek().value === "not") {
+        advance();
+        if (peek().type === "ident" && peek().value === "null") advance();
+        return { kind: "nullcheck", expr: varPath, isNull: false };
+      }
+      if (peek().type === "ident" && peek().value === "null") {
+        advance();
+        return { kind: "nullcheck", expr: varPath, isNull: true };
+      }
+    }
+
+    // Comparison operator
+    if (peek().type === "op") {
+      const op = advance().value;
+      const right = parseValue();
+      // Special case: != null and == null
+      if (right.type === "null") {
+        return { kind: "nullcheck", expr: varPath, isNull: op === "==" };
+      }
+      return { kind: "compare", op: mapOp(op), left: varPath, right };
+    }
+
+    // Bare variable = truthy check (not null)
+    return { kind: "nullcheck", expr: varPath, isNull: false };
+  }
+
+  function parseVarPath(): VariableRef {
+    const parts: string[] = [];
+    if (peek().type === "ident") {
+      parts.push(advance().value);
+      while (peek().type === "dot") {
+        advance();
+        if (peek().type === "ident") {
+          parts.push(advance().value);
+        }
+      }
+    }
+    return { kind: "variable", path: parts };
+  }
+
+  function parseValue(): ValueRef {
+    const tok = peek();
+    if (tok.type === "number") {
+      advance();
+      const num = parseFloat(tok.value);
+      return { kind: "value", type: "number", value: num };
+    }
+    if (tok.type === "string") {
+      advance();
+      return { kind: "value", type: "string", value: tok.value };
+    }
+    if (tok.type === "ident") {
+      advance();
+      if (tok.value === "null") return { kind: "value", type: "null", value: null };
+      if (tok.value === "true") return { kind: "value", type: "boolean", value: true };
+      if (tok.value === "false") return { kind: "value", type: "boolean", value: false };
+      // Unknown ident as string
+      return { kind: "value", type: "string", value: tok.value };
+    }
+    advance();
+    return { kind: "value", type: "null", value: null };
+  }
+
+  function mapOp(op: string): "eq" | "ne" | "lt" | "gt" | "le" | "ge" {
+    switch (op) {
+      case "==": return "eq";
+      case "!=": return "ne";
+      case "<": return "lt";
+      case ">": return "gt";
+      case "<=": return "le";
+      case ">=": return "ge";
+      default: return "eq";
+    }
+  }
+
+  return parseOr();
 }
 
 function parseActions(content: string): ActionSignature[] {

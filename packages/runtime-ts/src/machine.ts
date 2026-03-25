@@ -12,6 +12,8 @@ import type {
   Transition,
   ActionSignature,
   GuardExpression,
+  VariableRef,
+  ValueRef,
 } from "./types.js";
 import { StateValue, Effect, EffectResult, EffectStatus } from "./types.js";
 import type { EventBus, Event, EventType } from "./bus.js";
@@ -21,6 +23,11 @@ export type TransitionCallback = (
   fromState: StateValue,
   toState: StateValue
 ) => Promise<void>;
+
+export type ActionHandler = (
+  context: Record<string, unknown>,
+  event?: Record<string, unknown>
+) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 
 export interface TransitionResult {
   taken: boolean;
@@ -37,6 +44,8 @@ export class OrcaMachine {
   private onTransition?: TransitionCallback;
   private state: StateValue;
   private active = false;
+  private actionHandlers = new Map<string, ActionHandler>();
+  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     definition: MachineDef,
@@ -49,6 +58,14 @@ export class OrcaMachine {
     this.context = context ?? { ...definition.context };
     this.onTransition = onTransition;
     this.state = new StateValue(this.getInitialState());
+  }
+
+  registerAction(name: string, handler: ActionHandler): void {
+    this.actionHandlers.set(name, handler);
+  }
+
+  unregisterAction(name: string): void {
+    this.actionHandlers.delete(name);
   }
 
   private getInitialState(): string {
@@ -90,6 +107,9 @@ export class OrcaMachine {
 
     // Execute entry actions for initial state
     await this.executeEntryActions(this.state.leaf());
+
+    // Start timeout for initial state if defined
+    this.startTimeoutForState(this.state.leaf());
   }
 
   async stop(): Promise<void> {
@@ -97,6 +117,7 @@ export class OrcaMachine {
       return;
     }
 
+    this.cancelTimeout();
     this.active = false;
 
     await this.eventBus.publish({
@@ -158,12 +179,15 @@ export class OrcaMachine {
     const oldState = new StateValue(this.state.value);
     const newStateName = transition.target;
 
+    // Cancel any active timeout from the old state
+    this.cancelTimeout();
+
     // Execute exit actions
     await this.executeExitActions(oldState.leaf());
 
     // Execute transition action
     if (transition.action) {
-      await this.executeAction(transition.action);
+      await this.executeAction(transition.action, evt.payload);
     }
 
     // Update state
@@ -188,6 +212,9 @@ export class OrcaMachine {
 
     // Execute entry actions for new state
     await this.executeEntryActions(newStateName);
+
+    // Start timeout for new state if defined
+    this.startTimeoutForState(this.state.leaf());
 
     // Notify callback
     if (this.onTransition) {
@@ -320,14 +347,74 @@ export class OrcaMachine {
   }
 
   private async evalGuard(expr: GuardExpression): Promise<boolean> {
-    if (expr.kind === "true") {
-      return true;
+    switch (expr.kind) {
+      case "true":
+        return true;
+      case "false":
+        return false;
+      case "not":
+        return !(await this.evalGuard(expr.expr));
+      case "and":
+        return (await this.evalGuard(expr.left)) && (await this.evalGuard(expr.right));
+      case "or":
+        return (await this.evalGuard(expr.left)) || (await this.evalGuard(expr.right));
+      case "compare":
+        return this.evalCompare(expr.op, expr.left, expr.right);
+      case "nullcheck":
+        return this.evalNullcheck(expr.expr, expr.isNull);
+      default:
+        return true;
     }
-    if (expr.kind === "false") {
-      return false;
+  }
+
+  private resolveVariable(ref: VariableRef): unknown {
+    let current: unknown = this.context;
+    for (const part of ref.path) {
+      // Skip "ctx" or "context" prefix — the context is already the root
+      if (part === "ctx" || part === "context") continue;
+      if (current === null || current === undefined) return undefined;
+      current = (current as Record<string, unknown>)[part];
     }
-    // For now, simplified guard evaluation
-    return true;
+    return current;
+  }
+
+  private resolveValue(ref: ValueRef): unknown {
+    return ref.value;
+  }
+
+  private evalCompare(op: string, left: VariableRef, right: ValueRef): boolean {
+    const lhs = this.resolveVariable(left);
+    const rhs = this.resolveValue(right);
+
+    // Coerce to number for numeric comparisons if both sides are numeric
+    const lNum = typeof lhs === "number" ? lhs : Number(lhs);
+    const rNum = typeof rhs === "number" ? rhs : Number(rhs);
+    const bothNumeric = !isNaN(lNum) && !isNaN(rNum);
+
+    switch (op) {
+      case "eq":
+        // eslint-disable-next-line eqeqeq
+        return lhs == rhs;
+      case "ne":
+        // eslint-disable-next-line eqeqeq
+        return lhs != rhs;
+      case "lt":
+        return bothNumeric ? lNum < rNum : String(lhs) < String(rhs);
+      case "gt":
+        return bothNumeric ? lNum > rNum : String(lhs) > String(rhs);
+      case "le":
+        return bothNumeric ? lNum <= rNum : String(lhs) <= String(rhs);
+      case "ge":
+        return bothNumeric ? lNum >= rNum : String(lhs) >= String(rhs);
+      default:
+        return false;
+    }
+  }
+
+  private evalNullcheck(expr: VariableRef, isNull: boolean): boolean {
+    const val = this.resolveVariable(expr);
+    const valueIsNull = val === null || val === undefined;
+    return isNull ? valueIsNull : !valueIsNull;
   }
 
   private async executeEntryActions(stateName: string): Promise<void> {
@@ -387,9 +474,86 @@ export class OrcaMachine {
     await this.executeAction(stateDef.onExit);
   }
 
-  private async executeAction(actionName: string): Promise<void> {
-    // For actions without effects, just update context if needed
-    // Full implementation would call user-defined action function
+  private async executeAction(actionName: string, eventPayload?: Record<string, unknown>): Promise<void> {
+    const handler = this.actionHandlers.get(actionName);
+    if (!handler) {
+      return; // No handler registered — skip silently
+    }
+
+    const result = await handler(this.context, eventPayload);
+    if (result && typeof result === "object") {
+      Object.assign(this.context, result);
+    }
+  }
+
+  private startTimeoutForState(stateName: string): void {
+    const stateDef = this.findStateDef(stateName);
+    if (!stateDef?.timeout) {
+      return;
+    }
+
+    const durationMs = parseInt(stateDef.timeout.duration, 10) * 1000;
+    const target = stateDef.timeout.target;
+
+    this.timeoutTimer = setTimeout(() => {
+      this.timeoutTimer = null;
+      // Fire a synthetic timeout transition
+      if (this.active && this.state.leaf() === stateName) {
+        this.executeTimeoutTransition(stateName, target);
+      }
+    }, durationMs);
+  }
+
+  private cancelTimeout(): void {
+    if (this.timeoutTimer !== null) {
+      clearTimeout(this.timeoutTimer);
+      this.timeoutTimer = null;
+    }
+  }
+
+  private async executeTimeoutTransition(fromState: string, target: string): Promise<void> {
+    const oldState = new StateValue(this.state.value);
+
+    // Execute exit actions
+    await this.executeExitActions(fromState);
+
+    // Update state
+    if (this.isCompoundState(target)) {
+      const initialChild = this.getInitialChild(target);
+      this.state = new StateValue({ [target]: { [initialChild]: {} } });
+    } else {
+      this.state = new StateValue(target);
+    }
+
+    await this.eventBus.publish({
+      type: "orca.transition.started",
+      source: this.definition.name,
+      timestamp: new Date(),
+      payload: {
+        from: oldState.toString(),
+        to: target,
+        trigger: "timeout",
+      },
+    });
+
+    await this.executeEntryActions(target);
+
+    // Start timeout for the new state
+    this.startTimeoutForState(this.state.leaf());
+
+    if (this.onTransition) {
+      await this.onTransition(oldState, this.state);
+    }
+
+    await this.eventBus.publish({
+      type: "orca.transition.completed",
+      source: this.definition.name,
+      timestamp: new Date(),
+      payload: {
+        from: oldState.toString(),
+        to: this.state.toString(),
+      },
+    });
   }
 
   private findStateDef(stateName: string): StateDef | null {

@@ -78,10 +78,10 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 ```
 
 **Known Shared Gaps in Both Runtimes**
-- Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) is stubbed — always returns true
-- Plain (non-effect) action execution is a no-op — only effect-based actions trigger handlers
-- Timeout transitions are parsed but not enforced at runtime
-- Test coverage is minimal in both runtimes
+- Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — ✅ implemented and tested (25 tests per runtime)
+- Plain (non-effect) action execution — ✅ implemented via `registerAction()` / `register_action()` with context updates (9 tests per runtime)
+- Timeout transitions — ✅ implemented with auto-cancel on state exit/stop (9 tests per runtime)
+- Ignored events are parsed but never checked during dispatch
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
@@ -109,16 +109,16 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 1 | ✅ Complete | Core language, parser, verifier, XState/Mermaid compilation |
 | Phase 2 | ✅ Complete | LLM integration, prompt templates, action generation |
 | Phase 2.5 | ✅ Complete | CLI skills (`/generate-orca`, `/verify-orca`, etc.) |
-| Phase 2.7 | ✅ Functional | Both runtimes work (`orca-runtime-python`, `orca-runtime-ts`) — guards and plain actions stubbed |
+| Phase 2.7 | ✅ Complete | Both runtimes work — guards, actions, and timeouts all implemented |
 | Phase 2.8 | ✅ Complete | Two demos: `orca-demo-ts` (text adventure) and `orca-demo-python` (agent framework) |
 | Phase 3 | ✅ Partial | Hierarchical states complete in `orca-lang`; parallel regions not yet implemented |
 | Phase 4 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-machine composition) |
 
-**Phase 2.7 detail — what "functional" means:**
+**Phase 2.7 detail — what's implemented:**
 - Event bus (pub/sub, request/response), OrcaMachine, effect routing, DSL parsers all work
-- Guard evaluation for complex expressions is stubbed (always returns true) in both runtimes
-- Non-effect action execution is a no-op in both runtimes
-- Timeout transitions parsed but not enforced
+- Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — fully implemented
+- Plain action execution via `registerAction()` / `register_action()` — handlers receive context + event payload, return context updates
+- Timeout transitions enforced via `setTimeout` (TS) / `asyncio.create_task` (Python) — auto-cancel on state exit or machine stop
 - `machine.restore()` not implemented in orca-lang XState runtime
 
 **Phase 3 detail — what's done vs pending:**
