@@ -151,6 +151,15 @@ export class OrcaMachine {
       evt = event;
     }
 
+    // Check if event is explicitly ignored in current state
+    const eventKey = evt.eventName ?? evt.type;
+    if (this.isEventIgnored(eventKey)) {
+      return {
+        taken: false,
+        fromState: this.state.toString(),
+      };
+    }
+
     // Find matching transition
     const transition = this.findTransition(evt);
 
@@ -158,7 +167,7 @@ export class OrcaMachine {
       return {
         taken: false,
         fromState: this.state.toString(),
-        error: `No transition for event ${evt.eventName ?? evt.type} from ${this.state.leaf()}`,
+        error: `No transition for event ${eventKey} from ${this.state.leaf()}`,
       };
     }
 
@@ -570,6 +579,24 @@ export class OrcaMachine {
       }
     }
     return null;
+  }
+
+  private isEventIgnored(eventName: string): boolean {
+    const current = this.state.leaf();
+    const stateDef = this.findStateDef(current);
+    if (stateDef?.ignoredEvents.includes(eventName)) {
+      return true;
+    }
+    // Also check parent state's ignored events
+    let parent = this.getParentState(current);
+    while (parent) {
+      const parentDef = this.findStateDef(parent);
+      if (parentDef?.ignoredEvents.includes(eventName)) {
+        return true;
+      }
+      parent = this.getParentState(parent);
+    }
+    return false;
   }
 
   private findActionDef(actionName: string): ActionSignature | null {

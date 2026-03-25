@@ -52,7 +52,7 @@ export function createOrcaMachine(
     });
   }
 
-  return new OrcaMachineImpl(actor, options);
+  return new OrcaMachineImpl(actor, machine, options);
 }
 
 /**
@@ -132,10 +132,12 @@ function deepCloneWithInvokeReplacement(obj: any, handlerMap: Map<string, any>):
 
 class OrcaMachineImpl implements OrcaMachine {
   private actor: Actor<any>;
+  private machineLogic: ReturnType<typeof createMachine>;
   private options: OrcaMachineOptions;
 
-  constructor(actor: Actor<any>, options: OrcaMachineOptions) {
+  constructor(actor: Actor<any>, machineLogic: ReturnType<typeof createMachine>, options: OrcaMachineOptions) {
     this.actor = actor;
+    this.machineLogic = machineLogic;
     this.options = options;
   }
 
@@ -167,7 +169,33 @@ class OrcaMachineImpl implements OrcaMachine {
     };
   }
 
-  restore(_snapshot: OrcaSnapshot): void {
-    throw new Error('restore() is not yet implemented. Use initial context to re-create machine state.');
+  restore(snapshot: OrcaSnapshot): void {
+    // Stop the current actor
+    this.actor.stop();
+
+    // Build a persisted snapshot compatible with XState v5
+    const restoredSnapshot = this.machineLogic.resolveState({
+      value: snapshot.state.value,
+      context: snapshot.state.context,
+    } as any);
+
+    // Create a new actor from the persisted state
+    const newActor = createActor(this.machineLogic, {
+      snapshot: restoredSnapshot,
+    });
+
+    // Re-attach transition observer
+    if (this.options.onTransition) {
+      newActor.subscribe((state) => {
+        this.options.onTransition?.({
+          value: state.value as string,
+          context: state.context as Record<string, unknown>,
+          status: state.status as 'active' | 'done' | 'error',
+        });
+      });
+    }
+
+    this.actor = newActor;
+    this.actor.start();
   }
 }

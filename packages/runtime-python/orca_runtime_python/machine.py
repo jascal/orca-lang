@@ -187,15 +187,23 @@ class OrcaMachine:
         else:
             evt = event
 
+        # Check if event is explicitly ignored in current state
+        event_key = evt.event_name or evt.type.value
+        if self._is_event_ignored(event_key):
+            return TransitionResult(
+                taken=False,
+                from_state=str(self._state),
+            )
+
         # Find matching transition
         transition = self._find_transition(evt)
 
         if not transition:
-            # No transition found - event ignored
+            # No transition found - event unhandled
             return TransitionResult(
                 taken=False,
                 from_state=str(self._state),
-                error=f"No transition for event {evt.type.value} from {self._state.leaf()}"
+                error=f"No transition for event {event_key} from {self._state.leaf()}"
             )
 
         # Evaluate guard if present
@@ -558,6 +566,21 @@ class OrcaMachine:
                 "to": str(self._state),
             }
         ))
+
+    def _is_event_ignored(self, event_name: str) -> bool:
+        """Check if event is explicitly ignored in current state or parent states."""
+        current = self._state.leaf()
+        state_def = self._find_state_def(current)
+        if state_def and event_name in state_def.ignored_events:
+            return True
+        # Also check parent state's ignored events
+        parent = self._get_parent_state(current)
+        while parent:
+            parent_def = self._find_state_def(parent)
+            if parent_def and event_name in parent_def.ignored_events:
+                return True
+            parent = self._get_parent_state(parent)
+        return False
 
     def _find_state_def(self, state_name: str) -> StateDef | None:
         """Find state definition by name (including nested)."""

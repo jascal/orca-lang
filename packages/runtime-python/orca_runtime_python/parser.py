@@ -213,6 +213,10 @@ def _parse_state(lines: list[str], start: int) -> tuple[StateDef | None, int, in
             m = re.match(r"timeout:\s*(\d+)(?:s)?\s*->\s*(\w+)", body_line)
             if m:
                 state_def.timeout = {"duration": m.group(1), "target": m.group(2)}
+        elif body_line.startswith("ignore:"):
+            events_str = body_line.replace("ignore:", "", 1).strip()
+            ignored = [e.strip() for e in events_str.split(",") if e.strip()]
+            state_def.ignored_events.extend(ignored)
 
     # Parse nested states directly from body_lines
     if nested_state_lines:
@@ -337,6 +341,10 @@ def _parse_nested_state(body_lines: list[str], start: int) -> tuple[StateDef | N
             m = re.match(r"timeout:\s*(\d+)(?:s)?\s*->\s*(\w+)", body_line)
             if m:
                 state_def.timeout = {"duration": m.group(1), "target": m.group(2)}
+        elif body_line.startswith("ignore:"):
+            events_str = body_line.replace("ignore:", "", 1).strip()
+            ignored = [e.strip() for e in events_str.split(",") if e.strip()]
+            state_def.ignored_events.extend(ignored)
 
     # Recursively parse nested states
     if inner_nested_lines:

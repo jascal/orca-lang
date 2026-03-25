@@ -239,6 +239,10 @@ function parseState(lines: string[], start: number): ParseStateResult {
       if (m) {
         state.timeout = { duration: m[1], target: m[2] };
       }
+    } else if (bodyLine.startsWith("ignore:")) {
+      const eventsStr = bodyLine.replace(/^ignore:\s*/, "");
+      const ignored = eventsStr.split(",").map((e) => e.trim()).filter(Boolean);
+      state.ignoredEvents.push(...ignored);
     }
   }
 
@@ -359,6 +363,10 @@ function parseNestedState(bodyLines: string[], start: number): { state: StateDef
       if (m) {
         state.timeout = { duration: m[1], target: m[2] };
       }
+    } else if (bodyLine.startsWith("ignore:")) {
+      const eventsStr = bodyLine.replace(/^ignore:\s*/, "");
+      const ignored = eventsStr.split(",").map((e) => e.trim()).filter(Boolean);
+      state.ignoredEvents.push(...ignored);
     }
   }
 

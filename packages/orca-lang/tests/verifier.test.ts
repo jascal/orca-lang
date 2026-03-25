@@ -118,4 +118,171 @@ transitions {
     const result = checkDeterminism(machine);
     expect(result.valid).toBe(true);
   });
+
+  it('passes for simple negation pair (g and !g)', () => {
+    const machine = parseMachine(`
+machine NegPair
+context { x: int }
+events { ev }
+guards { ready: ctx.x > 0 }
+state s [initial] {}
+state a {}
+state b {}
+transitions {
+  s + ev [ready] -> a : _
+  s + ev [!ready] -> b : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.valid).toBe(true);
+    expect(result.errors.filter(e => e.code === 'GUARD_EXHAUSTIVENESS')).toHaveLength(0);
+  });
+
+  it('passes for complementary comparisons (< and >=)', () => {
+    const machine = parseMachine(`
+machine CompCompare
+context { retries: int = 0 }
+events { ev }
+guards {
+  can_retry: ctx.retries < 3
+  max_retries: ctx.retries >= 3
+}
+state s [initial] {}
+state retry {}
+state fail {}
+transitions {
+  s + ev [can_retry] -> retry : _
+  s + ev [max_retries] -> fail : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.valid).toBe(true);
+    expect(result.errors.filter(e => e.code === 'GUARD_EXHAUSTIVENESS')).toHaveLength(0);
+  });
+
+  it('passes for same-variable different-value eq comparisons', () => {
+    const machine = parseMachine(`
+machine EnumGuards
+context { status: int = 1 }
+events { ev }
+guards {
+  is_one: ctx.status = 1
+  is_two: ctx.status = 2
+}
+state s [initial] {}
+state a {}
+state b {}
+transitions {
+  s + ev [is_one] -> a : _
+  s + ev [is_two] -> b : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.valid).toBe(true);
+    expect(result.errors.filter(e => e.code === 'GUARD_EXHAUSTIVENESS')).toHaveLength(0);
+  });
+
+  it('passes for expression-level negation (g and !g via negated ref)', () => {
+    const machine = parseMachine(`
+machine ExprNeg
+context { x: int = 0 }
+events { ev }
+guards {
+  ready: true
+}
+state s [initial] {}
+state a {}
+state b {}
+transitions {
+  s + ev [ready] -> a : _
+  s + ev [!ready] -> b : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.valid).toBe(true);
+    expect(result.errors.filter(e => e.code === 'GUARD_EXHAUSTIVENESS')).toHaveLength(0);
+  });
+
+  it('warns for non-exclusive guards with different variables', () => {
+    const machine = parseMachine(`
+machine NonExcl
+context { x: int = 0, y: int = 0 }
+events { ev }
+guards {
+  g1: ctx.x > 0
+  g2: ctx.y > 0
+}
+state s [initial] {}
+state a {}
+state b {}
+transitions {
+  s + ev [g1] -> a : _
+  s + ev [g2] -> b : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.errors.some(e => e.code === 'GUARD_EXHAUSTIVENESS')).toBe(true);
+  });
+
+  it('detects multiple unguarded transitions as error', () => {
+    const machine = parseMachine(`
+machine MultiUnguarded
+context {}
+events { ev }
+state s [initial] {}
+state a {}
+state b {}
+transitions {
+  s + ev -> a : _
+  s + ev -> b : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some(e => e.code === 'NON_DETERMINISTIC')).toBe(true);
+  });
+
+  it('passes for complementary gt/le on same value', () => {
+    const machine = parseMachine(`
+machine GtLe
+context { score: int = 0 }
+events { ev }
+guards {
+  high: ctx.score > 100
+  low: ctx.score <= 100
+}
+state s [initial] {}
+state a {}
+state b {}
+transitions {
+  s + ev [high] -> a : _
+  s + ev [low] -> b : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.valid).toBe(true);
+    expect(result.errors.filter(e => e.code === 'GUARD_EXHAUSTIVENESS')).toHaveLength(0);
+  });
+
+  it('passes for non-overlapping numeric ranges', () => {
+    const machine = parseMachine(`
+machine Ranges
+context { temp: int = 50 }
+events { ev }
+guards {
+  cold: ctx.temp < 30
+  hot: ctx.temp > 80
+}
+state s [initial] {}
+state a {}
+state b {}
+transitions {
+  s + ev [cold] -> a : _
+  s + ev [hot] -> b : _
+}
+`);
+    const result = checkDeterminism(machine);
+    expect(result.valid).toBe(true);
+    expect(result.errors.filter(e => e.code === 'GUARD_EXHAUSTIVENESS')).toHaveLength(0);
+  });
 });
