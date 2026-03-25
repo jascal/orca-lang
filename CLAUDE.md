@@ -92,6 +92,11 @@ demo-python  ──depends on──>  runtime-python  (pip install -e, declared 
 
 The orca-lang package is independent — runtimes implement their own parsers and can operate without it.
 
+## Implementation Roadmap
+
+See `packages/orca-lang/CLAUDE.md` for detailed per-phase status. Next major milestone after Phase 3 completion:
+
+**Phase 3.5: Markdown Syntax Migration** — Replace the custom DSL (`.orca`) with a markdown-based format (`.orca.md`). Transitions become markdown tables, states become headings, events become bullet lists. Rationale: markdown is the format LLMs are most fluent in, enables embedding machine definitions in design docs, and renders without tooling. Full spec and example in `packages/orca-lang/docs/orca-proposal.md` Section 11.
+
 ## Known Shared Gaps in Both Runtimes
-- Ignored events are parsed but never checked during dispatch
-- Determinism verifier only checks simple negation pairs, not complex guard expressions
+- `machine.restore()` not implemented in runtime-ts or runtime-python (implemented in orca-lang XState runtime only)

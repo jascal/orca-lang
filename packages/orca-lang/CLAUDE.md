@@ -81,7 +81,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — ✅ implemented and tested (25 tests per runtime)
 - Plain (non-effect) action execution — ✅ implemented via `registerAction()` / `register_action()` with context updates (9 tests per runtime)
 - Timeout transitions — ✅ implemented with auto-cancel on state exit/stop (9 tests per runtime)
-- Ignored events are parsed but never checked during dispatch
+- Ignored events — ✅ implemented in both runtime-ts and runtime-python (checked during dispatch with parent state inheritance)
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
@@ -89,7 +89,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - **src/parser/parser.ts** - Hand-written recursive descent parser; handles SMGL syntax
 - **src/verifier/structural.ts** - Reachability, deadlock, orphan detection; `analyzeMachine()` builds the `MachineAnalysis` object
 - **src/verifier/completeness.ts** - Checks every (state, event) pair is handled or explicitly ignored
-- **src/verifier/determinism.ts** - Checks guards on multi-transition pairs are mutually exclusive
+- **src/verifier/determinism.ts** - Checks guards on multi-transition pairs are mutually exclusive; handles negation pairs, complementary comparisons (`<` vs `>=`, `==` vs `!=`), numeric range exclusion, nullcheck vs compare exclusivity, and AND/OR structural analysis
 - **src/compiler/xstate.ts** - Compiles AST to XState v5 `createMachine()` config
 - **src/compiler/mermaid.ts** - Compiles AST to Mermaid `stateDiagram-v2`
 - **src/runtime/effects.ts** - Effect routing types (Phase 2.7 complete - XState scaffolding)
@@ -111,22 +111,33 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 2.5 | ✅ Complete | CLI skills (`/generate-orca`, `/verify-orca`, etc.) |
 | Phase 2.7 | ✅ Complete | Both runtimes work — guards, actions, and timeouts all implemented |
 | Phase 2.8 | ✅ Complete | Two demos: `orca-demo-ts` (text adventure) and `orca-demo-python` (agent framework) |
-| Phase 3 | ✅ Partial | Hierarchical states complete in `orca-lang`; parallel regions not yet implemented |
-| Phase 4 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-machine composition) |
+| Phase 3 | ✅ Partial | Hierarchical states complete in `orca-lang`; parallel regions and property checking not yet implemented |
+| Phase 3.5 | ⏳ Not started | Markdown syntax migration — replace custom DSL with `.orca.md` format using tables, headers, and lists for LLM-native generation |
+| Phase 4 | ⏳ Not started | Additional compilation targets — Go is next priority (TypeScript and Python runtimes already exist) |
+| Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-machine composition) |
+| Phase 6 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
 
 **Phase 2.7 detail — what's implemented:**
 - Event bus (pub/sub, request/response), OrcaMachine, effect routing, DSL parsers all work
 - Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — fully implemented
 - Plain action execution via `registerAction()` / `register_action()` — handlers receive context + event payload, return context updates
 - Timeout transitions enforced via `setTimeout` (TS) / `asyncio.create_task` (Python) — auto-cancel on state exit or machine stop
-- `machine.restore()` not implemented in orca-lang XState runtime
+- `machine.restore()` implemented in orca-lang XState runtime (`src/runtime/machine.ts`), NOT implemented in standalone runtime-ts or runtime-python
 
 **Phase 3 detail — what's done vs pending:**
 - ✅ Hierarchical (nested) states — parser, verifier (flattening + compound state handling), XState compilation
 - ⏳ Parallel regions — `PARALLEL`/`REGION` keywords in lexer/AST only, no implementation
 - ⏳ Property specification / bounded model checking
-- ⏳ Additional compilation targets (Python, C, Lean)
-- ⏳ IDE integration
+
+**Phase 3.5 detail — Markdown Syntax Migration:**
+- ⏳ Formalize markdown grammar spec (required headings, table shapes, conventions)
+- ⏳ New markdown parser front-end (remark/markdown-it for TS, markdown-it-py for Python) producing same AST types
+- ⏳ `orca convert` CLI command to migrate `.orca` → `.orca.md`
+- ⏳ Update runtime-ts and runtime-python DSL parsers for markdown format
+- ⏳ Convert all example files to `.orca.md`
+- ⏳ Update `/generate-orca` and `/refine-orca` skill prompts to produce markdown
+- ⏳ Deprecate custom DSL parser (keep for backward compatibility)
+- ⏳ Revise proposal Section 3 (Language Specification) to use markdown as canonical format
 
 ### Skills (LLM-friendly CLI commands)
 

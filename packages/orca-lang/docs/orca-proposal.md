@@ -957,14 +957,112 @@ src/
 ### Phase 3: Advanced Features (post-demo)
 - Hierarchical states and parallel regions
 - Property specification and bounded model checking
-- Additional compilation targets (Python, C, Lean)
-- IDE integration with live verification
 
-### Phase 4: Ecosystem
+### Phase 3.5: Markdown Syntax Migration
+
+Replace the custom DSL syntax with a markdown-based format (`.orca.md`). The core motivation is that markdown is the format LLMs are most fluent in — they generate it constantly, rarely make structural errors in it, and don't need to learn custom operators. This phase converts Orca's syntax from a brace-delimited DSL to structured markdown while preserving all semantic capabilities.
+
+**Syntax mapping:**
+
+| Current DSL construct | Markdown equivalent |
+|---|---|
+| `machine Name` | `# machine Name` (H1 heading) |
+| `context { field: type }` | `## context` + markdown table (Field, Type, Default columns) |
+| `events { e1, e2 }` | `## events` + bullet list |
+| `state name [initial] { ... }` | `## state name [initial]` + blockquote for description, bullet list for on_entry/on_exit/timeout/ignore |
+| Nested states | Heading level nesting (`### state child [initial]` under `## state parent`) |
+| `transitions { src + event [guard] -> target : action }` | `## transitions` + markdown table (Source, Event, Guard, Target, Action columns) |
+| `guards { name: expr }` | `## guards` + markdown table (Name, Expression columns), expressions in backticks |
+| `actions { name: sig }` | `## actions` + markdown table (Name, Signature columns), signatures in backticks |
+
+**Key benefits:**
+- **LLM generation accuracy:** Markdown tables, headers, and lists have near-zero generation error rates vs. custom operators (`+`, `->`, `:`, `_`)
+- **Embeddability:** Orca machines can live inside design documents, READMEs, and chat messages. Prose and machine definition coexist naturally — the parser extracts structured sections and ignores surrounding text
+- **Renders without tooling:** Any markdown viewer displays a readable machine definition
+- **Simpler parser:** Structural parsing handled by a markdown parser library; only micro-parsers needed for guard expressions and type annotations inside table cells
+
+**Example (complete machine in markdown):**
+```markdown
+# machine PaymentProcessor
+
+This machine handles the payment lifecycle with retry logic.
+
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| order_id | string | |
+| amount | decimal | |
+| retry_count | int | 0 |
+| payment_token | string? | |
+
+## events
+- submit_payment
+- payment_authorized
+- payment_declined
+- retry_requested
+- cancel_requested
+
+## state idle [initial]
+> Waiting for a payment submission
+- on_entry: reset_context
+
+## state validating
+> Validating payment details before authorization
+- timeout: 30s -> payment_timeout
+
+## state declined
+> Payment was declined by the gateway
+
+## state failed [final]
+> Terminal failure state
+
+## guards
+| Name | Expression |
+|------|------------|
+| can_retry | `ctx.retry_count < 3` |
+
+## transitions
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| idle | submit_payment | | validating | initialize_payment |
+| validating | payment_authorized | | authorized | prepare_auth |
+| declined | retry_requested | can_retry | validating | increment_retry |
+| declined | retry_requested | !can_retry | failed | set_max_retries_error |
+| declined | cancel_requested | | failed | _ |
+
+## actions
+| Name | Signature |
+|------|-----------|
+| reset_context | `(ctx: Context) -> Context` |
+| initialize_payment | `(ctx: Context, event: SubmitPayment) -> Context` |
+```
+
+**Implementation steps:**
+1. **Spec:** Formalize the markdown grammar — which headings, table shapes, and conventions are required vs. optional
+2. **Markdown parser:** New parser front-end using a markdown AST library (remark/markdown-it for TS, markdown-it-py for Python) that extracts sections and produces the same AST types as the current parser
+3. **Converter tool:** `orca convert` CLI command to migrate existing `.orca` files to `.orca.md`
+4. **Update runtimes:** Adapt runtime-ts and runtime-python DSL parsers to accept both formats (or markdown-only)
+5. **Update examples:** Convert all example files to `.orca.md`
+6. **Update skills:** Modify `/generate-orca`, `/refine-orca` prompts to produce markdown format
+7. **Update compilers:** Ensure XState and Mermaid compilers work from the same AST (no changes needed if parser produces identical AST)
+8. **Deprecate DSL parser:** Keep for backward compatibility but mark as deprecated
+9. **Update proposal and documentation:** Revise Section 3 (Language Specification) to use markdown syntax as the canonical format
+
+### Phase 4: Additional Compilation Targets
+Go is the next priority target. TypeScript and Python runtimes already exist as standalone packages (`runtime-ts`, `runtime-python`). C and Lean remain longer-term possibilities.
+
+### Phase 5: Ecosystem
 - Orca package registry (reusable machine fragments)
 - Visual editor with bidirectional sync to Orca source
 - Fine-tuning dataset from verified machines
 - Multi-machine composition (machines as components)
+
+### Phase 6: IDE Integration
+IDE integration needs rethinking given the Phase 3.5 markdown migration. With `.orca.md` files that can be embedded in regular markdown documents, traditional approaches (LSP, VS Code extension with custom grammar) may not apply directly. Possibilities include:
+- Markdown language server extensions that recognize `## state`, `## transitions` sections
+- VS Code markdown preview integration that renders live state diagrams
+- Linting as a markdown plugin rather than a standalone language server
+- Leveraging existing markdown tooling (remark plugins, markdown-lint rules) rather than building from scratch
 
 ---
 
