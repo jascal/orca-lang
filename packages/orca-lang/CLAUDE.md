@@ -34,7 +34,8 @@ npx tsx src/index.ts visualize examples/simple-toggle.orca
 
 ### Pipeline Flow
 ```
-Source (.orca) → Lexer → Parser → AST → Verifier → Compiler → Output (XState/Mermaid)
+Source (.orca)    → Lexer → Parser → AST → Verifier → Compiler → Output (XState/Mermaid)
+Source (.orca.md) → Markdown Parser → AST → Verifier → Compiler → Output (XState/Mermaid)
 ```
 
 ### Runtime Architecture
@@ -87,8 +88,10 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
-- **src/parser/lexer.ts** - Tokenizer; keywords become TokenType enums
-- **src/parser/parser.ts** - Hand-written recursive descent parser; handles SMGL syntax
+- **src/parser/lexer.ts** - Tokenizer for DSL format; keywords become TokenType enums
+- **src/parser/parser.ts** - Hand-written recursive descent parser for `.orca` DSL syntax
+- **src/parser/markdown-parser.ts** - Two-phase markdown parser for `.orca.md` format (structural → semantic); produces identical AST
+- **src/parser/ast-to-markdown.ts** - AST-to-markdown converter for `orca convert` command
 - **src/verifier/structural.ts** - Reachability, deadlock, orphan detection; `analyzeMachine()` builds the `MachineAnalysis` object
 - **src/verifier/completeness.ts** - Checks every (state, event) pair is handled or explicitly ignored
 - **src/verifier/determinism.ts** - Checks guards on multi-transition pairs are mutually exclusive; handles negation pairs, complementary comparisons (`<` vs `>=`, `==` vs `!=`), numeric range exclusion, nullcheck vs compare exclusivity, and AND/OR structural analysis
@@ -115,7 +118,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 2.7 | ✅ Complete | Both runtimes work — guards, actions, and timeouts all implemented |
 | Phase 2.8 | ✅ Complete | Two demos: `orca-demo-ts` (text adventure) and `orca-demo-python` (agent framework) |
 | Phase 3 | ✅ Complete | Hierarchical states, parallel regions, property specification & guard-aware bounded model checking, snapshot/restore |
-| Phase 3.5 | ⏳ Not started | Markdown syntax migration — replace custom DSL with `.orca.md` format using tables, headers, and lists for LLM-native generation |
+| Phase 3.5 | ✅ Complete | Markdown syntax migration — `.orca.md` format with tables, headers, and lists for LLM-native generation |
 | Phase 4 | ⏳ Not started | Additional compilation targets — Go is next priority (TypeScript and Python runtimes already exist) |
 | Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-machine composition) |
 | Phase 6 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
@@ -132,15 +135,17 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - ✅ Property specification & guard-aware bounded model checking — 6 property types (`reachable`, `unreachable`, `passes_through`, `live`, `responds`, `invariant`), BFS-based model checker with counterexample traces, guard-aware transition pruning (statically-false guards skipped), machine size limit (64 states), integrated into verify pipeline and skills
 - ✅ Snapshot/restore — deep-copy state + context, timeout cancellation/restart, both runtimes (TS + Python) with 9 tests each
 
-**Phase 3.5 detail — Markdown Syntax Migration:**
-- ⏳ Formalize markdown grammar spec (required headings, table shapes, conventions)
-- ⏳ New markdown parser front-end (remark/markdown-it for TS, markdown-it-py for Python) producing same AST types
-- ⏳ `orca convert` CLI command to migrate `.orca` → `.orca.md`
-- ⏳ Update runtime-ts and runtime-python DSL parsers for markdown format
-- ⏳ Convert all example files to `.orca.md`
-- ⏳ Update `/generate-orca` and `/refine-orca` skill prompts to produce markdown
-- ⏳ Deprecate custom DSL parser (keep for backward compatibility)
-- ⏳ Revise proposal Section 3 (Language Specification) to use markdown as canonical format
+**Phase 3.5 detail — Markdown Syntax Migration (all complete):**
+- ✅ Formal markdown grammar spec (`docs/orca-md-grammar-spec.md`)
+- ✅ Hand-written markdown parser front-end (`src/parser/markdown-parser.ts`) — two-phase parse (structural → semantic), produces identical AST as DSL parser, 26 dedicated tests
+- ✅ AST-to-markdown converter (`src/parser/ast-to-markdown.ts`) — round-trip verified for all examples
+- ✅ `orca convert` CLI command — migrates `.orca` → `.orca.md` with round-trip AST verification
+- ✅ Format auto-detection by file extension (`.orca` → DSL, `.orca.md` → markdown) in CLI, skills, and all compilation paths
+- ✅ All 6 example files converted to `.orca.md` with verified round-trip fidelity
+- ✅ Runtime-ts markdown parser (`parseOrcaMd`, `parseOrcaAuto`) — full parallel/hierarchical support
+- ✅ Runtime-python markdown parser (`parse_orca_md`, `parse_orca_auto`) — full parallel/hierarchical support, 8 tests
+- ✅ Skill prompts (`/generate-orca`, `/refine-orca`) updated to produce markdown format
+- ✅ Custom DSL parser retained for backward compatibility — both formats work transparently
 
 ### Skills (LLM-friendly CLI commands)
 
@@ -153,13 +158,16 @@ orca /refine-orca examples/payment-processor.orca
 ```
 
 ### File Extension
-- Source files use `.orca` extension
-- The lexer/parser don't enforce extension - they just process text
+- Source files use `.orca` (legacy DSL) or `.orca.md` (markdown, preferred) extension
+- Format is auto-detected by extension: `.orca.md` → markdown parser, `.orca` → DSL parser
+- Both parsers produce identical AST types
+- Markdown format is now the canonical format for LLM generation
 
 ### Examples
-- `examples/simple-toggle.orca` - Minimal 2-state machine for quick testing
-- `examples/payment-processor.orca` - Full payment flow with guards and effects
-- `examples/text-adventure.orca` - Game engine with multiple states and guards
-- `examples/hierarchical-game.orca` - Hierarchical states: compound exploration/combat/inventory with nested children
-- `examples/parallel-order.orca` - Parallel regions: order processing with payment and notification flows running concurrently, `on_done` sync
-- `examples/payment-with-properties.orca` - Property specification: 6 domain-specific properties (reachability, exclusion, pass-through, liveness, bounded response, invariant)
+Each example exists in both `.orca` (DSL) and `.orca.md` (markdown) formats:
+- `examples/simple-toggle.orca[.md]` - Minimal 2-state machine for quick testing
+- `examples/payment-processor.orca[.md]` - Full payment flow with guards and effects
+- `examples/text-adventure.orca[.md]` - Game engine with multiple states and guards
+- `examples/hierarchical-game.orca[.md]` - Hierarchical states: compound exploration/combat/inventory with nested children
+- `examples/parallel-order.orca[.md]` - Parallel regions: order processing with payment and notification flows running concurrently, `on_done` sync
+- `examples/payment-with-properties.orca[.md]` - Property specification: 6 domain-specific properties (reachability, exclusion, pass-through, liveness, bounded response, invariant)

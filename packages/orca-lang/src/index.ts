@@ -18,6 +18,8 @@ import {
 } from './auth/providers/minimax.js';
 import { tokenize } from './parser/lexer.js';
 import { parse } from './parser/parser.js';
+import { parseMarkdown } from './parser/markdown-parser.js';
+import { machineToMarkdown } from './parser/ast-to-markdown.js';
 import { checkStructural } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
@@ -31,11 +33,23 @@ import type { OrcaMachine, OrcaMachineOptions, OrcaState } from './runtime/types
 // Re-export for use as a library
 export { tokenize } from './parser/lexer.js';
 export { parse } from './parser/parser.js';
+export { parseMarkdown } from './parser/markdown-parser.js';
+export { machineToMarkdown } from './parser/ast-to-markdown.js';
 export { compileToXState, compileToXStateMachine } from './compiler/xstate.js';
 export { compileToMermaid } from './compiler/mermaid.js';
 export { checkProperties } from './verifier/properties.js';
 export { createOrcaMachine };
 export type { OrcaMachine, OrcaMachineOptions, OrcaState, EffectHandlers, EffectResult, Effect } from './runtime/types.js';
+
+import type { MachineDef } from './parser/ast.js';
+
+/** Parse a file as either .orca (DSL) or .orca.md (markdown) based on extension */
+function parseFile(filePath: string, source: string): MachineDef {
+  if (filePath.endsWith('.orca.md') || (filePath.endsWith('.md') && !filePath.endsWith('.orca'))) {
+    return parseMarkdown(source).machine;
+  }
+  return parse(tokenize(source)).machine;
+}
 
 async function login(provider: string, profileId: string = 'default'): Promise<void> {
   console.log(`Logging in to ${provider}...`);
@@ -160,18 +174,17 @@ async function verify(filePath: string, json: boolean = false): Promise<void> {
 
   console.log(`Verifying ${filePath}...`);
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
+  const machine = parseFile(filePath, source);
 
-  console.log(`Parsed machine: ${result.machine.name}`);
-  console.log(`  States: ${result.machine.states.length}`);
-  console.log(`  Events: ${result.machine.events.length}`);
-  console.log(`  Transitions: ${result.machine.transitions.length}`);
+  console.log(`Parsed machine: ${machine.name}`);
+  console.log(`  States: ${machine.states.length}`);
+  console.log(`  Events: ${machine.events.length}`);
+  console.log(`  Transitions: ${machine.transitions.length}`);
 
-  const structural = checkStructural(result.machine);
-  const completeness = checkCompleteness(result.machine);
-  const determinism = checkDeterminism(result.machine);
-  const properties = checkProperties(result.machine);
+  const structural = checkStructural(machine);
+  const completeness = checkCompleteness(machine);
+  const determinism = checkDeterminism(machine);
+  const properties = checkProperties(machine);
 
   const allErrors = [
     ...structural.errors,
@@ -191,7 +204,7 @@ async function verify(filePath: string, json: boolean = false): Promise<void> {
     formatErrors(allErrors);
     if (errorCount > 0) process.exit(1);
   } else {
-    const propCount = result.machine.properties?.length ?? 0;
+    const propCount = machine.properties?.length ?? 0;
     if (propCount > 0) {
       console.log(`\nVerification passed! (${propCount} properties checked)`);
     } else {
@@ -207,9 +220,8 @@ async function compileXState(filePath: string, json: boolean = false): Promise<v
     return;
   }
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
-  const output = compileToXState(result.machine);
+  const machine = parseFile(filePath, source);
+  const output = compileToXState(machine);
   console.log(output);
 }
 
@@ -220,17 +232,15 @@ async function compileMermaid(filePath: string, json: boolean = false): Promise<
     return;
   }
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
-  const output = compileToMermaid(result.machine);
+  const machine = parseFile(filePath, source);
+  const output = compileToMermaid(machine);
   console.log(output);
 }
 
 async function visualize(filePath: string): Promise<void> {
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
-  const mermaid = compileToMermaid(result.machine);
+  const machine = parseFile(filePath, source);
+  const mermaid = compileToMermaid(machine);
   console.log('Mermaid diagram:');
   console.log(mermaid);
   console.log('\nYou can render this at: https://mermaid.live');
@@ -398,7 +408,7 @@ async function main(): Promise<void> {
         if (arg === '--tests') generateTests = true;
         if (arg === '--lang' && skillArgs[i + 1]) lang = skillArgs[++i];
         if ((arg === '--output' || arg === '-o') && skillArgs[i + 1]) outputPath = skillArgs[++i];
-        if (arg?.endsWith('.orca')) filePath = arg;
+        if (arg?.endsWith('.orca') || arg?.endsWith('.orca.md')) filePath = arg;
       }
 
       await generateActions(filePath, lang, false, useLLM, outputPath, generateTests);
@@ -474,6 +484,22 @@ async function main(): Promise<void> {
       await compileMermaid(filteredArgs[2] || filteredArgs[1], json);
     } else if (command === 'visualize') {
       await visualize(filteredArgs[1] || filteredArgs[0]);
+    } else if (command === 'convert') {
+      const inputPath = filteredArgs[1];
+      if (!inputPath) {
+        console.error('Usage: orca convert <input.orca> [-o <output.orca.md>]');
+        process.exit(1);
+      }
+      const outputIdx = filteredArgs.indexOf('-o');
+      const outputPath = outputIdx !== -1 ? filteredArgs[outputIdx + 1] : inputPath.replace(/\.orca$/, '.orca.md');
+      const source = readFileSync(inputPath, 'utf-8');
+      const machine = parseFile(inputPath, source);
+      const md = machineToMarkdown(machine);
+      writeFileSync(outputPath, md);
+      console.log(`Converted: ${inputPath} -> ${outputPath}`);
+      // Verify round-trip
+      const roundTrip = parseMarkdown(md).machine;
+      console.log(`Round-trip verification: ${JSON.stringify(machine) === JSON.stringify(roundTrip) ? 'PASS' : 'WARN: ASTs differ'}`);
     } else if (command === 'actions') {
       let lang = 'typescript';
       let useLLM = false;

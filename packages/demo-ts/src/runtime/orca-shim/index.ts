@@ -55,7 +55,7 @@ export function createOrcaMachine(
     machineDef,
     bus,
     options.context,
-    options.onTransition ? async (from, to) => options.onTransition?.({ value: to.toString() }) : undefined
+    options.onTransition ? async (from, to) => options.onTransition?.({ value: to.toString(), context: machine.context }) : undefined
   );
 
   return {
@@ -63,6 +63,6 @@ export function createOrcaMachine(
     start: () => machine.start(),
     stop: () => machine.stop(),
     send: (event: any) => machine.send(event),
-    getState: () => ({ value: machine.currentState.toString(), context: {} }),
+    getState: () => ({ value: machine.currentState.toString(), context: machine.context }),
   };
 }

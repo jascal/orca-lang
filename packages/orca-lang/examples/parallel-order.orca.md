@@ -1,0 +1,97 @@
+# machine ParallelOrderProcessor
+
+## context
+
+| Field               | Type   | Default |
+|---------------------|--------|---------|
+| order_id            | string |         |
+| payment_status      | string |         |
+| notification_status | string |         |
+| amount              | number | 0       |
+
+## events
+
+- PLACE_ORDER
+- PAYMENT_SUCCESS
+- PAYMENT_FAILED
+- EMAIL_SENT
+- SMS_SENT
+- RETRY_PAYMENT
+- CANCEL
+
+## state idle [initial]
+> Waiting for an order to be placed
+- ignore: PAYMENT_SUCCESS, PAYMENT_FAILED, EMAIL_SENT, SMS_SENT, RETRY_PAYMENT, CANCEL
+
+## state processing [parallel]
+> Order is being processed with payment and notification in parallel
+- on_entry: initializeOrder
+- ignore: PLACE_ORDER
+- on_done: -> completed
+
+### region payment_flow
+
+#### state charging [initial]
+> Attempting to charge the customer
+- on_entry: chargePayment
+
+#### state payment_failed
+> Payment failed, can retry
+
+#### state paid [final]
+> Payment has been received
+- on_entry: recordPayment
+
+
+### region notification_flow
+
+#### state sending_email [initial]
+> Sending order confirmation email
+- on_entry: sendConfirmationEmail
+
+#### state sending_sms
+> Sending SMS notification
+- on_entry: sendSmsNotification
+
+#### state notified [final]
+> All notifications sent
+
+
+## state completed [final]
+> Order fully processed and customer notified
+- on_entry: completeOrder
+
+## state cancelled [final]
+> Order was cancelled during processing
+- on_entry: refundIfNeeded
+
+## transitions
+
+| Source         | Event           | Guard | Target         | Action        |
+|----------------|-----------------|-------|----------------|---------------|
+| idle           | PLACE_ORDER     |       | processing     | validateOrder |
+| charging       | PAYMENT_SUCCESS |       | paid           |               |
+| charging       | PAYMENT_FAILED  |       | payment_failed |               |
+| payment_failed | RETRY_PAYMENT   |       | charging       |               |
+| sending_email  | EMAIL_SENT      |       | sending_sms    |               |
+| sending_sms    | SMS_SENT        |       | notified       |               |
+| processing     | CANCEL          |       | cancelled      |               |
+
+## guards
+
+| Name           | Expression       |
+|----------------|------------------|
+| hasValidAmount | `ctx.amount > 0` |
+
+## actions
+
+| Name                  | Signature                                  |
+|-----------------------|--------------------------------------------|
+| validateOrder         | `(ctx, event) -> Context`                  |
+| initializeOrder       | `(ctx) -> Context`                         |
+| chargePayment         | `(ctx) -> Context + Effect<PaymentCharge>` |
+| recordPayment         | `(ctx) -> Context`                         |
+| sendConfirmationEmail | `(ctx) -> Context + Effect<EmailSend>`     |
+| sendSmsNotification   | `(ctx) -> Context + Effect<SmsSend>`       |
+| completeOrder         | `(ctx) -> Context`                         |
+| refundIfNeeded        | `(ctx) -> Context + Effect<PaymentRefund>` |

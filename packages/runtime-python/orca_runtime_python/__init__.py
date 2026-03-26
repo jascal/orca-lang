@@ -26,7 +26,7 @@ from .bus import (
 
 from .machine import OrcaMachine
 
-from .parser import parse_orca
+from .parser import parse_orca, parse_orca_md, parse_orca_auto
 
 __version__ = "0.1.0"
 
@@ -51,4 +51,6 @@ __all__ = [
     "OrcaMachine",
     # Parser
     "parse_orca",
+    "parse_orca_md",
+    "parse_orca_auto",
 ]

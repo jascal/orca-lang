@@ -33,4 +33,4 @@ export { OrcaMachine } from "./machine.js";
 export type { TransitionCallback, TransitionResult, ActionHandler } from "./machine.js";
 
 // Parser
-export { parseOrca, ParseError } from "./parser.js";
+export { parseOrca, parseOrcaMd, parseOrcaAuto, ParseError } from "./parser.js";

@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { tokenize } from './parser/lexer.js';
 import { parse } from './parser/parser.js';
+import { parseMarkdown } from './parser/markdown-parser.js';
 import { checkStructural } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
@@ -13,6 +14,14 @@ import { createProvider } from './llm/index.js';
 import type { LLMProvider } from './llm/index.js';
 import { getCodeGenerator } from './generators/index.js';
 import { CodeGeneratorType } from './config/types.js';
+
+/** Parse a file as either .orca (DSL) or .orca.md (markdown) based on extension */
+function parseFile(filePath: string, source: string): { machine: MachineDef } {
+  if (filePath.endsWith('.orca.md') || (filePath.endsWith('.md') && !filePath.endsWith('.orca'))) {
+    return parseMarkdown(source);
+  }
+  return parse(tokenize(source));
+}
 
 export interface SkillError {
   code: string;
@@ -73,8 +82,7 @@ export async function verifySkill(filePath: string): Promise<VerifySkillResult> 
 
   let machine: MachineDef;
   try {
-    const tokens = tokenize(source);
-    const result = parse(tokens);
+    const result = parseFile(filePath, source);
     machine = result.machine;
   } catch (err) {
     // Parse error - return as verification error
@@ -89,7 +97,7 @@ export async function verifySkill(filePath: string): Promise<VerifySkillResult> 
         code: 'PARSE_ERROR',
         message,
         severity: 'error',
-        suggestion: 'Check Orca syntax - ensure proper bracing, keywords, and punctuation',
+        suggestion: 'Check Orca syntax - ensure proper formatting for .orca or .orca.md files',
       }],
     };
   }
@@ -129,8 +137,7 @@ export async function verifySkill(filePath: string): Promise<VerifySkillResult> 
 
 export async function compileSkill(filePath: string, target: 'xstate' | 'mermaid'): Promise<CompileSkillResult> {
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
+  const result = parseFile(filePath, source);
 
   // Run verification to get warnings
   const structural = checkStructural(result.machine);
@@ -175,8 +182,7 @@ export async function generateActionsSkill(
   generateTests: boolean = false
 ): Promise<GenerateActionsResult> {
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
+  const result = parseFile(filePath, source);
   const machine = result.machine;
 
   const actions: ActionScaffold[] = machine.actions.map(action => ({
@@ -509,12 +515,13 @@ export async function refineSkill(
   });
 
   const source = readFileSync(filePath, 'utf-8');
-  const tokens = tokenize(source);
-  const result = parse(tokens);
+  const result = parseFile(filePath, source);
   const machine = result.machine;
 
+  const isMd = filePath.endsWith('.orca.md') || filePath.endsWith('.md');
+
   const systemPrompt = `You are an expert in Orca state machine language. Given verification errors, fix the machine definition.
-Output ONLY the corrected Orca machine definition, no explanations.`;
+Output ONLY the corrected Orca machine definition in ${isMd ? 'markdown (.orca.md)' : 'DSL (.orca)'} format, no explanations.`;
 
   const errorList = errors.map(e => `[${e.severity.toUpperCase()}] ${e.code}: ${e.message}`).join('\n');
 
@@ -555,69 +562,77 @@ Provide the corrected machine definition:`;
   }
 }
 
-const ORCA_SYNTAX_REFERENCE = `Orca State Machine Syntax Reference:
+const ORCA_SYNTAX_REFERENCE = `Orca State Machine Markdown Syntax Reference (.orca.md):
 
-machine <Name>
+The machine definition uses standard markdown: headings, tables, bullet lists, and blockquotes.
 
-context {
-  field1: string
-  field2: int = 0
-  field3: string?
-  field4: bool
-}
+# machine MachineName
 
-events {
-  event1
-  event2
-  event3
-}
+## context
 
-state <name> [initial] [final] {
-  description: "..."
-  on_entry: -> action_name
-  on_exit: -> action_name
-  timeout: 5s -> target_state
-  ignore: event1, event2
-}
+| Field  | Type    | Default |
+|--------|---------|---------|
+| field1 | string  |         |
+| field2 | int     | 0       |
+| field3 | string? |         |
+| field4 | bool    |         |
 
-guards {
-  guard_name: ctx.field > 10
-  another_guard: ctx.status == "active"
-  has_item: ctx.inventory.length > 0
-}
+## events
+
+- event1
+- event2
+- event3
+
+## state idle [initial]
+> Description of this state
+- on_entry: action_name
+- on_exit: action_name
+- timeout: 5s -> target_state
+- ignore: event1, event2
+
+## state done [final]
+> Terminal state
+
+## transitions
+
+| Source | Event  | Guard  | Target | Action  |
+|--------|--------|--------|--------|---------|
+| idle   | event1 |        | active | action1 |
+| active | event2 | guard1 | done   | action2 |
+| active | event2 | !guard1| idle   |         |
+
+## guards
+
+| Name   | Expression                |
+|--------|---------------------------|
+| guard1 | \`ctx.field2 > 10\`         |
+| guard2 | \`ctx.status == "active"\`  |
 
 NOTE: Guards support ONLY: comparisons (< > == != <= >=), null checks (== null, != null), boolean operators (and, or, not). NO method calls like .contains(), .includes(), etc.
 
-transitions {
-  state1 + event1           -> state2          : action1
-  state1 + event2 [guard]    -> state3          : action2
-  state2 + event3           -> state2          : _
-}
+## actions
 
-actions {
-  action1: (ctx: Context) -> Context
-  action2: (ctx: Context, event: Event1) -> Context
-  action3: (ctx: Context) -> Context + Effect<EffectType>
-}
-
-Action implementations (in transitions, use _ for no action):
-  state + event -> target : action_name
-
-Action signatures declare types only. Context updates use spread syntax:
-  return { ...ctx, field: newValue }
-  return [ctx, { type: 'EffectType', payload: {} }]  // for effects
+| Name    | Signature                                  |
+|---------|--------------------------------------------|
+| action1 | \`(ctx) -> Context\`                         |
+| action2 | \`(ctx, event) -> Context\`                  |
+| action3 | \`(ctx) -> Context + Effect<EffectType>\`    |
 
 Key syntax notes:
 - [initial] marks the initial state (exactly one required)
 - [final] marks terminal states (zero or more allowed)
-- _ as action means "no action" (transition only changes state)
-- [guard] where guard is a name from the guards block
-- [!guard] negates the guard
+- Empty action column means "no action" (transition only changes state)
+- Guard column uses guard name from guards table; prefix with ! to negate
+- Guard expressions in backticks in the guards table
+- Action signatures in backticks in the actions table
 - Effect<T> in return type means the action emits an effect
 - ctx.field accesses context fields (read-only in guards)
 - timeout: 5s -> target means 5 second timeout transition
-- Action BODIES are NOT written in Orca - only signatures in the actions block
-- Transitions reference actions by name; actions are implemented separately`;
+- Action BODIES are NOT written in Orca - only signatures in the actions table
+- Transitions reference actions by name; actions are implemented separately
+- States are headings (## for top-level, ### for nested children)
+- State descriptions use blockquotes (> text)
+- File extension should be .orca.md`;
 
 export async function generateOrcaSkill(
   naturalLanguageSpec: string,
@@ -642,7 +657,7 @@ export async function generateOrcaSkill(
     temperature: config.temperature,
   });
 
-  const systemPrompt = `You are an expert in Orca state machine design. Generate Orca machine definitions from natural language descriptions.
+  const systemPrompt = `You are an expert in Orca state machine design. Generate Orca machine definitions in markdown (.orca.md) format from natural language descriptions.
 
 ${ORCA_SYNTAX_REFERENCE}
 
@@ -653,9 +668,9 @@ IMPORTANT - Guard Restrictions:
 - If you need complex logic, compute it in an action and store a boolean flag in context
 
 IMPORTANT - Action Syntax:
-- The actions block declares ONLY SIGNATURES (names and types), not implementations
-- Write: action_name: (ctx: Context) -> Context
-- NEVER write action bodies like: action_name: (ctx: Context) -> Context { return ... }
+- The actions table declares ONLY SIGNATURES (names and types), not implementations
+- Write signatures in backticks: \`(ctx) -> Context\`
+- NEVER write action bodies
 - Transitions reference actions by name only
 
 Important rules:
@@ -666,7 +681,7 @@ Important rules:
 - Context should contain all data needed for guards and actions
 - For effects (API calls, I/O), use Effect<T> return type in the signature
 
-Output ONLY the Orca machine definition, wrapped in a code fence, with no additional text.`;
+Output ONLY the Orca machine definition in .orca.md markdown format, wrapped in a code fence, with no additional text.`;
 
   let currentOrca = '';
   let iteration = 0;
@@ -690,8 +705,8 @@ Output ONLY the Orca machine definition, wrapped in a code fence, with no additi
       // Extract Orca code from response
       currentOrca = stripCodeFence(response.content);
 
-      // Verify the generated Orca
-      const tempFile = `/tmp/orca_gen_${Date.now()}.orca`;
+      // Verify the generated Orca (markdown format)
+      const tempFile = `/tmp/orca_gen_${Date.now()}.orca.md`;
       const { writeFileSync } = await import('fs');
       writeFileSync(tempFile, currentOrca);
 
@@ -726,7 +741,7 @@ Output ONLY the Orca machine definition, wrapped in a code fence, with no additi
     status: 'requires_refinement',
     machine: extractMachineNameFromSource(currentOrca),
     orca: currentOrca,
-    verification: await verifySkill(`/tmp/orca_gen_${Date.now()}.orca`).catch(() => ({
+    verification: await verifySkill(`/tmp/orca_gen_${Date.now()}.orca.md`).catch(() => ({
       status: 'invalid' as const,
       machine: 'unknown',
       states: 0,
@@ -741,14 +756,14 @@ let lastErrors: SkillError[] = [];
 
 function stripCodeFence(code: string): string {
   return code
-    .replace(/^```orca\n/, '')
+    .replace(/^```(?:orca|markdown|md|orca\.md)?\n/, '')
     .replace(/^```\n/, '')
-    .replace(/^```typescript\n/, '')
     .replace(/\n```$/, '')
     .trim();
 }
 
 function extractMachineNameFromSource(orca: string): string {
-  const match = orca.match(/^machine\s+(\w+)/m);
+  // Support both DSL format (machine Name) and markdown format (# machine Name)
+  const match = orca.match(/^(?:#\s+)?machine\s+(\w+)/m);
   return match ? match[1] : 'Unknown';
 }
