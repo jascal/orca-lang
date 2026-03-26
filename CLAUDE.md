@@ -65,7 +65,7 @@ npx tsx src/index.ts compile mermaid examples/text-adventure.orca
 The core language package. See `packages/orca-lang/CLAUDE.md` for detailed architecture, source organization, verifier details, and implementation status.
 
 - **Parser**: hand-written recursive descent (lexer + parser + AST)
-- **Verifiers**: structural (reachability, deadlocks), completeness, determinism
+- **Verifiers**: structural (reachability, deadlocks), completeness, determinism, property checking (bounded model checking)
 - **Compilers**: XState v5 config + string output, Mermaid stateDiagram-v2
 - **Runtime**: XState-based effect runtime with handler registry
 - **LLM integration**: Anthropic, OpenAI, Grok, Ollama providers
@@ -96,9 +96,7 @@ The orca-lang package is independent — runtimes implement their own parsers an
 
 See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 
-**Completed through Phase 3**: Core language, LLM integration, CLI skills, both runtimes (TS + Python) with guards/actions/timeouts/ignored events, two demos, hierarchical states, and parallel regions across all packages. 77 orca-lang tests, 54 runtime-ts tests, 55 runtime-python tests.
-
-**Remaining in Phase 3**: Property specification / bounded model checking.
+**Phase 3 Complete**: Core language, LLM integration, CLI skills, both runtimes (TS + Python) with guards/actions/timeouts/ignored events, two demos, hierarchical states, parallel regions, and property specification with bounded model checking. 111 orca-lang tests, 54 runtime-ts tests, 55 runtime-python tests.
 
 **Next major milestone — Phase 3.5: Markdown Syntax Migration** — Replace the custom DSL (`.orca`) with a markdown-based format (`.orca.md`). Transitions become markdown tables, states become headings, events become bullet lists. Rationale: markdown is the format LLMs are most fluent in, enables embedding machine definitions in design docs, and renders without tooling. Full spec and example in `packages/orca-lang/docs/orca-proposal.md` Section 11.
 

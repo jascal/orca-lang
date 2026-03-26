@@ -4,6 +4,7 @@ import { parse } from './parser/parser.js';
 import { checkStructural } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
+import { checkProperties } from './verifier/properties.js';
 import { compileToXState } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { MachineDef } from './parser/ast.js';
@@ -96,38 +97,24 @@ export async function verifySkill(filePath: string): Promise<VerifySkillResult> 
   const structural = checkStructural(machine);
   const completeness = checkCompleteness(machine);
   const determinism = checkDeterminism(machine);
+  const properties = checkProperties(machine);
+
+  const mapError = (e: { code: string; message: string; severity: 'error' | 'warning'; location?: { state?: string; event?: string }; suggestion?: string }): SkillError => ({
+    code: e.code,
+    message: e.message,
+    severity: e.severity,
+    location: e.location ? {
+      state: e.location.state,
+      event: e.location.event,
+    } : undefined,
+    suggestion: e.suggestion,
+  });
 
   const allErrors: SkillError[] = [
-    ...structural.errors.map(e => ({
-      code: e.code,
-      message: e.message,
-      severity: e.severity,
-      location: e.location ? {
-        state: e.location.state,
-        event: e.location.event,
-      } : undefined,
-      suggestion: e.suggestion,
-    })),
-    ...completeness.errors.map(e => ({
-      code: e.code,
-      message: e.message,
-      severity: e.severity,
-      location: e.location ? {
-        state: e.location.state,
-        event: e.location.event,
-      } : undefined,
-      suggestion: e.suggestion,
-    })),
-    ...determinism.errors.map(e => ({
-      code: e.code,
-      message: e.message,
-      severity: e.severity,
-      location: e.location ? {
-        state: e.location.state,
-        event: e.location.event,
-      } : undefined,
-      suggestion: e.suggestion,
-    })),
+    ...structural.errors.map(mapError),
+    ...completeness.errors.map(mapError),
+    ...determinism.errors.map(mapError),
+    ...properties.errors.map(mapError),
   ];
 
   return {

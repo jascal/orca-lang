@@ -56,6 +56,7 @@ export type TokenType =
   | 'PARALLEL'
   | 'REGION'
   | 'ON_DONE'
+  | 'PROPERTIES'
   | 'EOF'
   | 'UNKNOWN';
 
@@ -159,6 +160,45 @@ export interface ActionSignature {
   effectType?: string;
 }
 
+// Property types for bounded model checking
+
+export interface ReachabilityProperty {
+  kind: 'reachable' | 'unreachable';
+  from: string;
+  to: string;
+}
+
+export interface PassesThroughProperty {
+  kind: 'passes_through';
+  from: string;
+  to: string;
+  through: string;
+}
+
+export interface LiveProperty {
+  kind: 'live';
+}
+
+export interface RespondsProperty {
+  kind: 'responds';
+  from: string;
+  to: string;
+  within: number;
+}
+
+export interface InvariantProperty {
+  kind: 'invariant';
+  expression: GuardExpression;
+  inState?: string;
+}
+
+export type Property =
+  | ReachabilityProperty
+  | PassesThroughProperty
+  | LiveProperty
+  | RespondsProperty
+  | InvariantProperty;
+
 export interface MachineDef {
   name: string;
   context: ContextField[];
@@ -167,6 +207,7 @@ export interface MachineDef {
   transitions: Transition[];
   guards: GuardDef[];
   actions: ActionSignature[];
+  properties?: Property[];
 }
 
 export interface ParseResult {

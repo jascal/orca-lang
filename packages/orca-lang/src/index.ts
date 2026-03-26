@@ -21,6 +21,7 @@ import { parse } from './parser/parser.js';
 import { checkStructural } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
+import { checkProperties } from './verifier/properties.js';
 import { compileToXState, compileToXStateMachine } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { verifySkill, compileSkill, generateActionsSkill, refineSkill, generateOrcaSkill } from './skills.js';
@@ -32,6 +33,7 @@ export { tokenize } from './parser/lexer.js';
 export { parse } from './parser/parser.js';
 export { compileToXState, compileToXStateMachine } from './compiler/xstate.js';
 export { compileToMermaid } from './compiler/mermaid.js';
+export { checkProperties } from './verifier/properties.js';
 export { createOrcaMachine };
 export type { OrcaMachine, OrcaMachineOptions, OrcaState, EffectHandlers, EffectResult, Effect } from './runtime/types.js';
 
@@ -169,19 +171,32 @@ async function verify(filePath: string, json: boolean = false): Promise<void> {
   const structural = checkStructural(result.machine);
   const completeness = checkCompleteness(result.machine);
   const determinism = checkDeterminism(result.machine);
+  const properties = checkProperties(result.machine);
 
   const allErrors = [
     ...structural.errors,
     ...completeness.errors,
     ...determinism.errors,
+    ...properties.errors,
   ];
 
   if (allErrors.length > 0) {
-    console.log(`\nFound ${allErrors.filter(e => e.severity === 'error').length} errors:`);
+    const errorCount = allErrors.filter(e => e.severity === 'error').length;
+    const warningCount = allErrors.filter(e => e.severity === 'warning').length;
+    if (errorCount > 0) {
+      console.log(`\nFound ${errorCount} error(s)${warningCount > 0 ? ` and ${warningCount} warning(s)` : ''}:`);
+    } else {
+      console.log(`\nFound ${warningCount} warning(s):`);
+    }
     formatErrors(allErrors);
-    process.exit(1);
+    if (errorCount > 0) process.exit(1);
   } else {
-    console.log('\nVerification passed!');
+    const propCount = result.machine.properties?.length ?? 0;
+    if (propCount > 0) {
+      console.log(`\nVerification passed! (${propCount} properties checked)`);
+    } else {
+      console.log('\nVerification passed!');
+    }
   }
 }
 

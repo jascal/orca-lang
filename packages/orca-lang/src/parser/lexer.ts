@@ -19,6 +19,7 @@ const KEYWORDS: Record<string, TokenType> = {
   parallel: 'PARALLEL',
   region: 'REGION',
   on_done: 'ON_DONE',
+  properties: 'PROPERTIES',
 };
 
 const OPERATORS: Record<string, TokenType> = {
@@ -140,8 +141,13 @@ export class Lexer {
     const tokens: Token[] = [];
 
     while (this.pos < this.source.length) {
-      this.skipWhitespace();
-      this.skipComment();
+      // Skip whitespace and comments repeatedly (comments end before \n, so re-skip)
+      let prevPos: number;
+      do {
+        prevPos = this.pos;
+        this.skipWhitespace();
+        this.skipComment();
+      } while (this.pos !== prevPos);
       if (this.pos >= this.source.length) break;
 
       const start = this.getPosition();

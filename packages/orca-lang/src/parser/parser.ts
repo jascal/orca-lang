@@ -1,4 +1,4 @@
-import { Token, ParseResult, MachineDef, ContextField, EventDef, StateDef, Transition, GuardDef, GuardExpression, ActionSignature, ParallelDef, RegionDef, SyncStrategy } from './ast.js';
+import { Token, ParseResult, MachineDef, ContextField, EventDef, StateDef, Transition, GuardDef, GuardExpression, ActionSignature, ParallelDef, RegionDef, SyncStrategy, Property, ReachabilityProperty, PassesThroughProperty, RespondsProperty, InvariantProperty } from './ast.js';
 
 export class Parser {
   private tokens: Token[];
@@ -538,6 +538,118 @@ export class Parser {
     return actions;
   }
 
+  private parseProperties(): Property[] {
+    const properties: Property[] = [];
+    this.expect('LBRACE');
+
+    while (!this.match('RBRACE')) {
+      const keyword = this.peek();
+
+      if (keyword.type !== 'IDENT') {
+        throw new Error(`Expected property keyword at ${keyword.pos.line}:${keyword.pos.column}, got ${keyword.type} "${keyword.value}"`);
+      }
+
+      switch (keyword.value) {
+        case 'reachable':
+        case 'unreachable': {
+          this.advance();
+          this.expect('COLON');
+          const to = this.expect('IDENT').value;
+          // Handle dot-notation state names
+          let toName = to;
+          while (this.match('DOT')) {
+            toName += '.' + this.expect('IDENT').value;
+          }
+          const fromKw = this.expect('IDENT');
+          if (fromKw.value !== 'from') {
+            throw new Error(`Expected 'from' at ${fromKw.pos.line}:${fromKw.pos.column}, got '${fromKw.value}'`);
+          }
+          let fromName = this.expect('IDENT').value;
+          while (this.match('DOT')) {
+            fromName += '.' + this.expect('IDENT').value;
+          }
+          properties.push({ kind: keyword.value, from: fromName, to: toName } as ReachabilityProperty);
+          break;
+        }
+
+        case 'passes_through': {
+          this.advance();
+          this.expect('COLON');
+          let through = this.expect('IDENT').value;
+          while (this.match('DOT')) {
+            through += '.' + this.expect('IDENT').value;
+          }
+          const forKw = this.expect('IDENT');
+          if (forKw.value !== 'for') {
+            throw new Error(`Expected 'for' at ${forKw.pos.line}:${forKw.pos.column}, got '${forKw.value}'`);
+          }
+          let from = this.expect('IDENT').value;
+          while (this.match('DOT')) {
+            from += '.' + this.expect('IDENT').value;
+          }
+          this.expect('ARROW');
+          let to = this.expect('IDENT').value;
+          while (this.match('DOT')) {
+            to += '.' + this.expect('IDENT').value;
+          }
+          properties.push({ kind: 'passes_through', from, to, through } as PassesThroughProperty);
+          break;
+        }
+
+        case 'live': {
+          this.advance();
+          properties.push({ kind: 'live' });
+          break;
+        }
+
+        case 'responds': {
+          this.advance();
+          this.expect('COLON');
+          let to = this.expect('IDENT').value;
+          while (this.match('DOT')) {
+            to += '.' + this.expect('IDENT').value;
+          }
+          const fromKw = this.expect('IDENT');
+          if (fromKw.value !== 'from') {
+            throw new Error(`Expected 'from' at ${fromKw.pos.line}:${fromKw.pos.column}, got '${fromKw.value}'`);
+          }
+          let from = this.expect('IDENT').value;
+          while (this.match('DOT')) {
+            from += '.' + this.expect('IDENT').value;
+          }
+          const withinKw = this.expect('IDENT');
+          if (withinKw.value !== 'within') {
+            throw new Error(`Expected 'within' at ${withinKw.pos.line}:${withinKw.pos.column}, got '${withinKw.value}'`);
+          }
+          const bound = parseInt(this.expect('NUMBER').value, 10);
+          properties.push({ kind: 'responds', from, to, within: bound } as RespondsProperty);
+          break;
+        }
+
+        case 'invariant': {
+          this.advance();
+          this.expect('COLON');
+          const expression = this.parseGuardExpression();
+          let inState: string | undefined;
+          if (this.peek().type === 'IDENT' && this.peek().value === 'in') {
+            this.advance();
+            inState = this.expect('IDENT').value;
+            while (this.match('DOT')) {
+              inState += '.' + this.expect('IDENT').value;
+            }
+          }
+          properties.push({ kind: 'invariant', expression, inState } as InvariantProperty);
+          break;
+        }
+
+        default:
+          throw new Error(`Unknown property type '${keyword.value}' at ${keyword.pos.line}:${keyword.pos.column}. Expected: reachable, unreachable, passes_through, live, responds, invariant`);
+      }
+    }
+
+    return properties;
+  }
+
   parse(): ParseResult {
     this.expect('MACHINE');
     const name = this.expect('IDENT').value;
@@ -548,6 +660,7 @@ export class Parser {
     let transitions: Transition[] = [];
     let guards: GuardDef[] = [];
     let actions: ActionSignature[] = [];
+    let properties: Property[] | undefined;
 
     while (this.peek().type !== 'EOF') {
       if (this.match('CONTEXT')) {
@@ -563,6 +676,8 @@ export class Parser {
         guards = this.parseGuardDefinitions();
       } else if (this.match('ACTIONS')) {
         actions = this.parseActionSignatures();
+      } else if (this.match('PROPERTIES')) {
+        properties = this.parseProperties();
       } else {
         throw new Error(`Unexpected token: ${this.peek().type} "${this.peek().value}" at ${this.peek().pos.line}:${this.peek().pos.column}`);
       }
@@ -570,8 +685,13 @@ export class Parser {
 
     this.expect('EOF');
 
+    const machine: MachineDef = { name, context, events, states, transitions, guards, actions };
+    if (properties && properties.length > 0) {
+      machine.properties = properties;
+    }
+
     return {
-      machine: { name, context, events, states, transitions, guards, actions },
+      machine,
       tokens: this.tokens,
     };
   }
