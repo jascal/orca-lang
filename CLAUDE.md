@@ -94,9 +94,18 @@ The orca-lang package is independent — runtimes implement their own parsers an
 
 ## Implementation Roadmap
 
-See `packages/orca-lang/CLAUDE.md` for detailed per-phase status. Next major milestone after Phase 3 completion:
+See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 
-**Phase 3.5: Markdown Syntax Migration** — Replace the custom DSL (`.orca`) with a markdown-based format (`.orca.md`). Transitions become markdown tables, states become headings, events become bullet lists. Rationale: markdown is the format LLMs are most fluent in, enables embedding machine definitions in design docs, and renders without tooling. Full spec and example in `packages/orca-lang/docs/orca-proposal.md` Section 11.
+**Completed through Phase 3**: Core language, LLM integration, CLI skills, both runtimes (TS + Python) with guards/actions/timeouts/ignored events, two demos, hierarchical states, and parallel regions across all packages. 77 orca-lang tests, 54 runtime-ts tests, 55 runtime-python tests.
+
+**Remaining in Phase 3**: Property specification / bounded model checking.
+
+**Next major milestone — Phase 3.5: Markdown Syntax Migration** — Replace the custom DSL (`.orca`) with a markdown-based format (`.orca.md`). Transitions become markdown tables, states become headings, events become bullet lists. Rationale: markdown is the format LLMs are most fluent in, enables embedding machine definitions in design docs, and renders without tooling. Full spec and example in `packages/orca-lang/docs/orca-proposal.md` Section 11.
 
 ## Known Shared Gaps in Both Runtimes
 - `machine.restore()` not implemented in runtime-ts or runtime-python (implemented in orca-lang XState runtime only)
+
+## Known Limitations (v1 parallel regions)
+- `any-final` sync strategy has no native XState equivalent — works in standalone runtimes only
+- Nested parallel (parallel inside a region) is disallowed for v1
+- Mermaid parallel rendering depends on renderer support for `--` syntax in `stateDiagram-v2`

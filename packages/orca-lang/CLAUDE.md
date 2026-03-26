@@ -77,11 +77,13 @@ from orca_runtime_python import parse_orca, OrcaMachine
 import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 ```
 
-**Known Shared Gaps in Both Runtimes**
-- Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — ✅ implemented and tested (25 tests per runtime)
-- Plain (non-effect) action execution — ✅ implemented via `registerAction()` / `register_action()` with context updates (9 tests per runtime)
-- Timeout transitions — ✅ implemented with auto-cancel on state exit/stop (9 tests per runtime)
-- Ignored events — ✅ implemented in both runtime-ts and runtime-python (checked during dispatch with parent state inheritance)
+**Runtime Feature Parity (both runtime-ts and runtime-python)**
+- ✅ Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — 25 tests per runtime
+- ✅ Plain (non-effect) action execution via `registerAction()` / `register_action()` — 9 tests per runtime
+- ✅ Timeout transitions with auto-cancel on state exit/stop — 9 tests per runtime
+- ✅ Ignored events with parent state inheritance — 8 tests per runtime
+- ✅ Parallel regions with multi-region state values, per-leaf event dispatch, sync strategies — 12-13 tests per runtime
+- ⏳ `machine.restore()` — implemented in orca-lang XState runtime only, not in standalone runtimes
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
@@ -122,7 +124,6 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — fully implemented
 - Plain action execution via `registerAction()` / `register_action()` — handlers receive context + event payload, return context updates
 - Timeout transitions enforced via `setTimeout` (TS) / `asyncio.create_task` (Python) — auto-cancel on state exit or machine stop
-- `machine.restore()` implemented in orca-lang XState runtime (`src/runtime/machine.ts`), NOT implemented in standalone runtime-ts or runtime-python
 
 **Phase 3 detail — what's done vs pending:**
 - ✅ Hierarchical (nested) states — parser, verifier (flattening + compound state handling), XState compilation
