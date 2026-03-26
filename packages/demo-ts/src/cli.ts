@@ -24,7 +24,7 @@ async function main() {
   console.log('╚════════════════════════════════════════╝\n');
 
   // Load and parse the game.orca file
-  const orcaPath = join(__dirname, 'orca', 'game.orca');
+  const orcaPath = join(__dirname, 'orca', 'game.orca.md');
   const source = readFileSync(orcaPath, 'utf-8');
 
   console.log('Loading game...');

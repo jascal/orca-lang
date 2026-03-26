@@ -53,10 +53,16 @@ def test_auto_detect_md():
 
 
 def test_auto_detect_dsl():
-    """Auto-detect DSL format by filename."""
-    source = (EXAMPLES_DIR / "payment-processor.orca").read_text()
-    machine = parse_orca_auto(source, "payment.orca")
-    assert machine.name == "PaymentProcessor"
+    """Auto-detect DSL format by filename (legacy support)."""
+    # Inline DSL source for backward compatibility testing
+    source = """machine TestMachine
+context { value: int = 0 }
+events { tick }
+state idle [initial] {}
+transitions { idle + tick -> idle }
+actions { do_nothing: () -> Context }"""
+    machine = parse_orca_auto(source, "test.orca")
+    assert machine.name == "TestMachine"
 
 
 def test_auto_detect_content_sniff_md():
@@ -67,10 +73,15 @@ def test_auto_detect_content_sniff_md():
 
 
 def test_auto_detect_content_sniff_dsl():
-    """Auto-detect DSL by content sniffing."""
-    source = (EXAMPLES_DIR / "payment-processor.orca").read_text()
+    """Auto-detect DSL by content sniffing (legacy support)."""
+    # Inline DSL source for backward compatibility testing
+    source = """machine LegacyMachine
+context { x: int }
+events { go }
+state start [initial] {}
+transitions { start + go -> start }"""
     machine = parse_orca_auto(source)
-    assert machine.name == "PaymentProcessor"
+    assert machine.name == "LegacyMachine"
 
 
 def test_parse_parallel_md():

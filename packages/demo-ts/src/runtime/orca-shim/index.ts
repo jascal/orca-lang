@@ -5,7 +5,7 @@
  * as the full orca language package (tokenize, parse, createOrcaMachine).
  */
 
-import { parseOrca, OrcaMachine, EventBus, getEventBus, resetEventBus, EventType, createEffectRouter } from '@orca-lang/orca-runtime-ts';
+import { parseOrcaAuto, OrcaMachine, EventBus, getEventBus, resetEventBus, EventType, createEffectRouter } from '@orca-lang/orca-runtime-ts';
 import type { MachineDef } from '@orca-lang/orca-runtime-ts';
 
 // Re-export types and runtime components
@@ -17,9 +17,9 @@ export function tokenize(source: string): string {
   return source;
 }
 
-// Parse - wraps parseOrca to return the same structure as the orca package
+// Parse - auto-detects format (DSL or markdown) and parses accordingly
 export function parse(source: string): { machine: MachineDef } {
-  const machine = parseOrca(source);
+  const machine = parseOrcaAuto(source);
   return { machine };
 }
 

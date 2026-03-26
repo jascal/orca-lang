@@ -561,12 +561,12 @@ describe('AST to Markdown Converter', () => {
   });
 });
 
-describe('Round-trip: DSL → AST → Markdown → AST', () => {
-  function roundTrip(orcaSource: string) {
-    const dslResult = parse(tokenize(orcaSource));
-    const md = machineToMarkdown(dslResult.machine);
-    const mdResult = parseMarkdown(md);
-    return { dslMachine: dslResult.machine, mdMachine: mdResult.machine };
+describe('Round-trip: Markdown → AST → Markdown → AST (idempotency)', () => {
+  function roundTripMd(mdSource: string) {
+    const mdResult = parseMarkdown(mdSource);
+    const md2 = machineToMarkdown(mdResult.machine);
+    const mdResult2 = parseMarkdown(md2);
+    return { first: mdResult.machine, second: mdResult2.machine };
   }
 
   function stripParentsAndTokens(machine: any): any {
@@ -579,38 +579,38 @@ describe('Round-trip: DSL → AST → Markdown → AST', () => {
   }
 
   it('round-trips simple-toggle', () => {
-    const source = readFileSync(join(__dirname, '../examples/simple-toggle.orca'), 'utf-8');
-    const { dslMachine, mdMachine } = roundTrip(source);
-    expect(stripParentsAndTokens(mdMachine)).toEqual(stripParentsAndTokens(dslMachine));
+    const source = readFileSync(join(__dirname, '../examples/simple-toggle.orca.md'), 'utf-8');
+    const { first, second } = roundTripMd(source);
+    expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
 
   it('round-trips payment-processor', () => {
-    const source = readFileSync(join(__dirname, '../examples/payment-processor.orca'), 'utf-8');
-    const { dslMachine, mdMachine } = roundTrip(source);
-    expect(stripParentsAndTokens(mdMachine)).toEqual(stripParentsAndTokens(dslMachine));
+    const source = readFileSync(join(__dirname, '../examples/payment-processor.orca.md'), 'utf-8');
+    const { first, second } = roundTripMd(source);
+    expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
 
   it('round-trips text-adventure', () => {
-    const source = readFileSync(join(__dirname, '../examples/text-adventure.orca'), 'utf-8');
-    const { dslMachine, mdMachine } = roundTrip(source);
-    expect(stripParentsAndTokens(mdMachine)).toEqual(stripParentsAndTokens(dslMachine));
+    const source = readFileSync(join(__dirname, '../examples/text-adventure.orca.md'), 'utf-8');
+    const { first, second } = roundTripMd(source);
+    expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
 
   it('round-trips hierarchical-game', () => {
-    const source = readFileSync(join(__dirname, '../examples/hierarchical-game.orca'), 'utf-8');
-    const { dslMachine, mdMachine } = roundTrip(source);
-    expect(stripParentsAndTokens(mdMachine)).toEqual(stripParentsAndTokens(dslMachine));
+    const source = readFileSync(join(__dirname, '../examples/hierarchical-game.orca.md'), 'utf-8');
+    const { first, second } = roundTripMd(source);
+    expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
 
   it('round-trips parallel-order', () => {
-    const source = readFileSync(join(__dirname, '../examples/parallel-order.orca'), 'utf-8');
-    const { dslMachine, mdMachine } = roundTrip(source);
-    expect(stripParentsAndTokens(mdMachine)).toEqual(stripParentsAndTokens(dslMachine));
+    const source = readFileSync(join(__dirname, '../examples/parallel-order.orca.md'), 'utf-8');
+    const { first, second } = roundTripMd(source);
+    expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
 
   it('round-trips payment-with-properties', () => {
-    const source = readFileSync(join(__dirname, '../examples/payment-with-properties.orca'), 'utf-8');
-    const { dslMachine, mdMachine } = roundTrip(source);
-    expect(stripParentsAndTokens(mdMachine)).toEqual(stripParentsAndTokens(dslMachine));
+    const source = readFileSync(join(__dirname, '../examples/payment-with-properties.orca.md'), 'utf-8');
+    const { first, second } = roundTripMd(source);
+    expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
 });

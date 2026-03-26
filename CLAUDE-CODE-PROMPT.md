@@ -52,9 +52,9 @@ orca/
 │   │   └── effects.ts            # Effect routing and execution
 │   └── index.ts                  # CLI entry point
 ├── examples/
-│   ├── payment-processor.orca    # The example from the proposal
-│   ├── text-adventure.orca       # The retro-quest style example
-│   └── simple-toggle.orca        # Minimal example for testing
+│   ├── payment-processor.orca.md    # The example from the proposal
+│   ├── text-adventure.orca.md       # The retro-quest style example
+│   └── simple-toggle.orca.md        # Minimal example for testing
 ├── tests/
 │   ├── parser.test.ts
 │   ├── verifier.test.ts
@@ -89,10 +89,10 @@ orca/
 5. **Mermaid compiler** (`src/compiler/mermaid.ts`) — Compile Orca AST to Mermaid `stateDiagram-v2` syntax for visual output.
 
 6. **CLI** (`src/index.ts`) — Simple CLI that:
-   - `orca verify <file.orca>` — parse + verify, report errors
-   - `orca compile xstate <file.orca>` — output XState config
-   - `orca compile mermaid <file.orca>` — output Mermaid diagram
-   - `orca visualize <file.orca>` — compile to Mermaid and render (or just output for now)
+   - `orca verify <file.orca.md>` — parse + verify, report errors
+   - `orca compile xstate <file.orca.md>` — output XState config
+   - `orca compile mermaid <file.orca.md>` — output Mermaid diagram
+   - `orca visualize <file.orca.md>` — compile to Mermaid and render (or just output for now)
 
 ### Key Design Decisions
 
@@ -120,9 +120,9 @@ Once the basic structure is in place, examine these local repos for patterns and
 
 ### Success Criteria for Phase 1
 
-- [ ] Parse all three example `.orca` files without errors
+- [ ] Parse all three example `.orca.md` files without errors
 - [ ] Verify topology and produce correct error messages for intentionally broken machines
-- [ ] Compile payment-processor.orca to valid XState v5 config
+- [ ] Compile payment-processor.orca.md to valid XState v5 config
 - [ ] Compile all examples to Mermaid diagrams
 - [ ] CLI works for all three commands
 - [ ] Tests pass for parser, verifier, and both compilers

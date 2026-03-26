@@ -24,17 +24,16 @@ npm run test:watch
 npx vitest run tests/parser.test.ts
 
 # CLI commands (requires build or use tsx)
-npx tsx src/index.ts verify examples/simple-toggle.orca
-npx tsx src/index.ts compile xstate examples/payment-processor.orca
-npx tsx src/index.ts compile mermaid examples/text-adventure.orca
-npx tsx src/index.ts visualize examples/simple-toggle.orca
+npx tsx src/index.ts verify examples/simple-toggle.orca.md
+npx tsx src/index.ts compile xstate examples/payment-processor.orca.md
+npx tsx src/index.ts compile mermaid examples/text-adventure.orca.md
+npx tsx src/index.ts visualize examples/simple-toggle.orca.md
 ```
 
 ## Architecture
 
 ### Pipeline Flow
 ```
-Source (.orca)    → Lexer → Parser → AST → Verifier → Compiler → Output (XState/Mermaid)
 Source (.orca.md) → Markdown Parser → AST → Verifier → Compiler → Output (XState/Mermaid)
 ```
 
@@ -52,8 +51,8 @@ Orca is designed to be **runtime-agnostic** - the core language, parser, and ver
 
 | Package | Path | Language | Status |
 |---------|------|----------|--------|
-| `orca-runtime-python` | `packages/runtime-python` | Python | Functional — async event bus, state machine runtime, effect handlers, DSL parser |
-| `@orca-lang/orca-runtime-ts` | `packages/runtime-ts` | TypeScript | Functional — event bus, OrcaMachine, effect router, DSL parser (not XState-dependent) |
+| `orca-runtime-python` | `packages/runtime-python` | Python | Functional — async event bus, state machine runtime, effect handlers, markdown parser |
+| `@orca-lang/orca-runtime-ts` | `packages/runtime-ts` | TypeScript | Functional — event bus, OrcaMachine, effect router, markdown parser (not XState-dependent) |
 
 **Demo Applications** (sibling packages in this monorepo)
 
@@ -72,10 +71,10 @@ Orca is designed to be **runtime-agnostic** - the core language, parser, and ver
 **Importing Across Runtimes**
 ```
 # Python runtime
-from orca_runtime_python import parse_orca, OrcaMachine
+from orca_runtime_python import parse_orca_auto, OrcaMachine
 
 # TypeScript runtime
-import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
+import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 ```
 
 **Runtime Feature Parity (both runtime-ts and runtime-python)**
@@ -88,9 +87,8 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
-- **src/parser/lexer.ts** - Tokenizer for DSL format; keywords become TokenType enums
-- **src/parser/parser.ts** - Hand-written recursive descent parser for `.orca` DSL syntax
-- **src/parser/markdown-parser.ts** - Two-phase markdown parser for `.orca.md` format (structural → semantic); produces identical AST
+- **src/parser/lexer.ts** - Tokenizer for `.orca.md` markdown format; keywords become TokenType enums
+- **src/parser/markdown-parser.ts** - Two-phase markdown parser for `.orca.md` format (structural → semantic); produces AST
 - **src/parser/ast-to-markdown.ts** - AST-to-markdown converter for `orca convert` command
 - **src/verifier/structural.ts** - Reachability, deadlock, orphan detection; `analyzeMachine()` builds the `MachineAnalysis` object
 - **src/verifier/completeness.ts** - Checks every (state, event) pair is handled or explicitly ignored
@@ -124,7 +122,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 6 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
 
 **Phase 2.7 detail — what's implemented:**
-- Event bus (pub/sub, request/response), OrcaMachine, effect routing, DSL parsers all work
+- Event bus (pub/sub, request/response), OrcaMachine, effect routing, markdown parsers all work
 - Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — fully implemented
 - Plain action execution via `registerAction()` / `register_action()` — handlers receive context + event payload, return context updates
 - Timeout transitions enforced via `setTimeout` (TS) / `asyncio.create_task` (Python) — auto-cancel on state exit or machine stop
@@ -137,37 +135,36 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 
 **Phase 3.5 detail — Markdown Syntax Migration (all complete):**
 - ✅ Formal markdown grammar spec (`docs/orca-md-grammar-spec.md`)
-- ✅ Hand-written markdown parser front-end (`src/parser/markdown-parser.ts`) — two-phase parse (structural → semantic), produces identical AST as DSL parser, 26 dedicated tests
+- ✅ Hand-written markdown parser front-end (`src/parser/markdown-parser.ts`) — two-phase parse (structural → semantic), produces AST, 26 dedicated tests
 - ✅ AST-to-markdown converter (`src/parser/ast-to-markdown.ts`) — round-trip verified for all examples
-- ✅ `orca convert` CLI command — migrates `.orca` → `.orca.md` with round-trip AST verification
-- ✅ Format auto-detection by file extension (`.orca` → DSL, `.orca.md` → markdown) in CLI, skills, and all compilation paths
+- ✅ `orca convert` CLI command — migrates legacy `.orca` files to `.orca.md` with round-trip AST verification
+- ✅ Format auto-detection by file extension (`.orca` → DSL legacy, `.orca.md` → markdown) in CLI, skills, and all compilation paths
 - ✅ All 6 example files converted to `.orca.md` with verified round-trip fidelity
 - ✅ Runtime-ts markdown parser (`parseOrcaMd`, `parseOrcaAuto`) — full parallel/hierarchical support
 - ✅ Runtime-python markdown parser (`parse_orca_md`, `parse_orca_auto`) — full parallel/hierarchical support, 8 tests
 - ✅ Skill prompts (`/generate-orca`, `/refine-orca`) updated to produce markdown format
-- ✅ Custom DSL parser retained for backward compatibility — both formats work transparently
+- ✅ Legacy DSL parser retained for backward compatibility with existing `.orca` files
 
 ### Skills (LLM-friendly CLI commands)
 
 ```bash
 orca /generate-orca "A payment processor with retries"
-orca /verify-orca examples/payment-processor.orca
-orca /compile-orca xstate examples/payment-processor.orca
-orca /generate-actions --use-llm examples/payment-processor.orca typescript
-orca /refine-orca examples/payment-processor.orca
+orca /verify-orca examples/payment-processor.orca.md
+orca /compile-orca xstate examples/payment-processor.orca.md
+orca /generate-actions --use-llm examples/payment-processor.orca.md typescript
+orca /refine-orca examples/payment-processor.orca.md
 ```
 
 ### File Extension
-- Source files use `.orca` (legacy DSL) or `.orca.md` (markdown, preferred) extension
-- Format is auto-detected by extension: `.orca.md` → markdown parser, `.orca` → DSL parser
-- Both parsers produce identical AST types
-- Markdown format is now the canonical format for LLM generation
+- Source files use `.orca.md` (markdown) extension
+- Legacy `.orca` files are still supported via auto-detection (DSL parser)
+- Markdown format is the canonical format for LLM generation
 
 ### Examples
-Each example exists in both `.orca` (DSL) and `.orca.md` (markdown) formats:
-- `examples/simple-toggle.orca[.md]` - Minimal 2-state machine for quick testing
-- `examples/payment-processor.orca[.md]` - Full payment flow with guards and effects
-- `examples/text-adventure.orca[.md]` - Game engine with multiple states and guards
-- `examples/hierarchical-game.orca[.md]` - Hierarchical states: compound exploration/combat/inventory with nested children
-- `examples/parallel-order.orca[.md]` - Parallel regions: order processing with payment and notification flows running concurrently, `on_done` sync
-- `examples/payment-with-properties.orca[.md]` - Property specification: 6 domain-specific properties (reachability, exclusion, pass-through, liveness, bounded response, invariant)
+Each example is in `.orca.md` (markdown) format:
+- `examples/simple-toggle.orca.md` - Minimal 2-state machine for quick testing
+- `examples/payment-processor.orca.md` - Full payment flow with guards and effects
+- `examples/text-adventure.orca.md` - Game engine with multiple states and guards
+- `examples/hierarchical-game.orca.md` - Hierarchical states: compound exploration/combat/inventory with nested children
+- `examples/parallel-order.orca.md` - Parallel regions: order processing with payment and notification flows running concurrently, `on_done` sync
+- `examples/payment-with-properties.orca.md` - Property specification: 6 domain-specific properties (reachability, exclusion, pass-through, liveness, bounded response, invariant)

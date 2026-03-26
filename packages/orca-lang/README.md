@@ -8,16 +8,16 @@ The core insight: LLMs generate flat transition tables reliably, and Orca's topo
 
 ```bash
 # Parse and verify a machine
-npx tsx src/index.ts verify examples/simple-toggle.orca
+npx tsx src/index.ts verify examples/simple-toggle.orca.md
 
 # Compile to XState v5
-npx tsx src/index.ts compile xstate examples/payment-processor.orca
+npx tsx src/index.ts compile xstate examples/payment-processor.orca.md
 
 # Compile to Mermaid diagram
-npx tsx src/index.ts compile mermaid examples/text-adventure.orca
+npx tsx src/index.ts compile mermaid examples/text-adventure.orca.md
 
 # Visualize (output Mermaid for rendering)
-npx tsx src/index.ts visualize examples/simple-toggle.orca
+npx tsx src/index.ts visualize examples/simple-toggle.orca.md
 ```
 
 ## Installation
@@ -32,18 +32,18 @@ npm run build
 Orca's CLI exposes structured skills designed for LLM consumption:
 
 ```bash
-orca /verify-orca examples/payment-processor.orca
-orca /compile-orca xstate examples/payment-processor.orca
-orca /generate-actions examples/payment-processor.orca typescript
+orca /verify-orca examples/payment-processor.orca.md
+orca /compile-orca xstate examples/payment-processor.orca.md
+orca /generate-actions examples/payment-processor.orca.md typescript
 ```
 
 ## Architecture
 
 ```
-Source (.orca) → Lexer → Parser → AST → Verifier → Compiler → Output (XState/Mermaid)
+Source (.orca.md) → Markdown Parser → AST → Verifier → Compiler → Output (XState/Mermaid)
 ```
 
-- **`src/parser/`** — Hand-written recursive descent parser
+- **`src/parser/`** — Two-phase markdown parser (structural → semantic)
 - **`src/verifier/`** — Topology checks (reachability, deadlock, completeness, determinism)
 - **`src/compiler/`** — XState v5 and Mermaid compilation targets
 - **`src/llm/`** — LLM provider abstraction (Anthropic, OpenAI, Grok, Ollama)
@@ -109,16 +109,16 @@ Credentials are stored in `~/.orca/auth_profiles.json`.
 
 ```bash
 # Without LLM (template-based, no API key needed)
-orca actions examples/payment-processor.orca
+orca actions examples/payment-processor.orca.md
 
 # With LLM (requires API key)
-orca /generate-actions --use-llm examples/payment-processor.orca typescript
+orca /generate-actions --use-llm examples/payment-processor.orca.md typescript
 
 # Output to directory (one file per action)
-orca /generate-actions --use-llm examples/payment-processor.orca --output ./actions/
+orca /generate-actions --use-llm examples/payment-processor.orca.md --output ./actions/
 
 # Output to single file (all actions combined)
-orca /generate-actions --use-llm examples/payment-processor.orca --output ./actions.ts
+orca /generate-actions --use-llm examples/payment-processor.orca.md --output ./actions.ts
 ```
 
 See [docs/orca-proposal.md](docs/orca-proposal.md) for the full design specification.

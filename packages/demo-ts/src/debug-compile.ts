@@ -2,7 +2,7 @@
 import { tokenize, parse, compileToXStateMachine } from './runtime/orca-shim';
 import { readFileSync } from 'fs';
 
-const source = readFileSync('./src/orca/game.orca', 'utf-8');
+const source = readFileSync('./src/orca/game.orca.md', 'utf-8');
 const result = parse(tokenize(source));
 const compiled = compileToXStateMachine(result.machine as any);
 

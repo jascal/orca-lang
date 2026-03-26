@@ -13,8 +13,8 @@ const __dirname = dirname(__filename);
 async function main() {
   console.log('=== Retro-Adventure Orca Test ===\n');
 
-  // Load and parse the game.orca file
-  const orcaPath = join(__dirname, 'orca', 'game.orca');
+  // Load and parse the game.orca.md file
+  const orcaPath = join(__dirname, 'orca', 'game.orca.md');
   console.log(`Loading Orca file: ${orcaPath}`);
   const source = readFileSync(orcaPath, 'utf-8');
 

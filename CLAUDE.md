@@ -54,9 +54,9 @@ cd packages/demo-ts && pnpm run cli
 
 # CLI commands (from packages/orca-lang)
 cd packages/orca-lang
-npx tsx src/index.ts verify examples/simple-toggle.orca
-npx tsx src/index.ts compile xstate examples/payment-processor.orca
-npx tsx src/index.ts compile mermaid examples/text-adventure.orca
+npx tsx src/index.ts verify examples/simple-toggle.orca.md
+npx tsx src/index.ts compile xstate examples/payment-processor.orca.md
+npx tsx src/index.ts compile mermaid examples/text-adventure.orca.md
 ```
 
 ## Package Details
@@ -64,19 +64,19 @@ npx tsx src/index.ts compile mermaid examples/text-adventure.orca
 ### packages/orca-lang (core)
 The core language package. See `packages/orca-lang/CLAUDE.md` for detailed architecture, source organization, verifier details, and implementation status.
 
-- **Parser**: hand-written recursive descent for `.orca` DSL (lexer + parser + AST) and two-phase markdown parser for `.orca.md` format
+- **Parser**: two-phase markdown parser for `.orca.md` format (lexer + parser + AST) with format auto-detection
 - **Verifiers**: structural (reachability, deadlocks), completeness, determinism, property checking (bounded model checking)
 - **Compilers**: XState v5 config + string output, Mermaid stateDiagram-v2
-- **Converter**: `orca convert` — migrates `.orca` → `.orca.md` with round-trip verification
+- **Converter**: `orca convert` — migrates legacy `.orca` files to `.orca.md` with round-trip verification
 - **Runtime**: XState-based effect runtime with handler registry
 - **LLM integration**: Anthropic, OpenAI, Grok, Ollama providers
 - **CLI skills**: `/generate-orca`, `/verify-orca`, `/compile-orca`, `/generate-actions`, `/refine-orca`
 
 ### packages/runtime-ts (@orca-lang/orca-runtime-ts)
-Standalone TypeScript runtime (not XState-dependent). Event bus with pub/sub and request/response, OrcaMachine class, effect router, Orca DSL + markdown parser.
+Standalone TypeScript runtime (not XState-dependent). Event bus with pub/sub and request/response, OrcaMachine class, effect router, markdown parser with auto-detection.
 
 ### packages/runtime-python (orca-runtime-python)
-Standalone Python async runtime. Zero external dependencies. Async event bus, OrcaMachine, effect handlers with decorator API, Orca DSL + markdown parser.
+Standalone Python async runtime. Zero external dependencies. Async event bus, OrcaMachine, effect handlers with decorator API, markdown parser with auto-detection.
 
 ### packages/demo-ts (orca-demo-ts)
 Playable text adventure game. Interactive CLI, 8-state machine, world map with 4 locations, inventory system, score tracking, LLM narrative generation path. Depends on `@orca-lang/orca-runtime-ts` via pnpm workspace.
@@ -97,7 +97,7 @@ The orca-lang package is independent — runtimes implement their own parsers an
 
 See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 
-**Phase 3.5 Complete**: Markdown syntax migration — `.orca.md` format with tables, headings, and bullet lists. Both parsers (DSL + markdown) produce identical ASTs. All runtimes support both formats via auto-detection. 137 orca-lang tests (26 markdown parser), 63 runtime-ts tests, 72 runtime-python tests (8 markdown parser). Skill prompts updated for markdown generation.
+**Phase 3.5 Complete**: Markdown syntax migration — `.orca.md` format with tables, headings, and bullet lists. Auto-detection selects the appropriate parser. All runtimes support markdown format. 137 orca-lang tests (26 markdown parser), 63 runtime-ts tests, 72 runtime-python tests (8 markdown parser). Skill prompts updated for markdown generation.
 
 **Next major milestone — Phase 4: Additional Compilation Targets** — Go runtime is next priority (TypeScript and Python runtimes already exist).
 
