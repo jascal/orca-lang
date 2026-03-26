@@ -116,7 +116,7 @@ function areGuardsMutuallyExclusive(
 /**
  * Resolve a GuardRef (name + negated flag) into its full GuardExpression.
  */
-function resolveGuardExpression(
+export function resolveGuardExpression(
   ref: GuardRef,
   guardDefs: Map<string, GuardDef>,
 ): GuardExpression | null {
@@ -132,7 +132,7 @@ function resolveGuardExpression(
 /**
  * Check if two guard expressions are mutually exclusive (can never both be true).
  */
-function areExpressionsMutuallyExclusive(a: GuardExpression, b: GuardExpression): boolean {
+export function areExpressionsMutuallyExclusive(a: GuardExpression, b: GuardExpression): boolean {
   // Unwrap negation: a and not(a) are exclusive
   const aNorm = unwrapNot(a);
   const bNorm = unwrapNot(b);
@@ -304,4 +304,25 @@ function variablePathsEqual(a: VariableRef, b: VariableRef): boolean {
 
 function valuesEqual(a: ValueRef, b: ValueRef): boolean {
   return a.type === b.type && a.value === b.value;
+}
+
+/**
+ * Check if a guard expression is statically always false.
+ * Detects: literal false, AND(x, not(x)), numeric contradictions.
+ */
+export function isExpressionStaticallyFalse(expr: GuardExpression): boolean {
+  if (expr.kind === 'false') return true;
+
+  // AND with contradictory branches: (A and not(A))
+  if (expr.kind === 'and') {
+    if (areExpressionsMutuallyExclusive(expr.left, expr.right)) return true;
+    // Either branch being false makes the whole thing false
+    if (isExpressionStaticallyFalse(expr.left)) return true;
+    if (isExpressionStaticallyFalse(expr.right)) return true;
+  }
+
+  // not(true) = false
+  if (expr.kind === 'not' && expr.expr.kind === 'true') return true;
+
+  return false;
 }

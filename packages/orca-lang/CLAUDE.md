@@ -83,7 +83,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - ✅ Timeout transitions with auto-cancel on state exit/stop — 9 tests per runtime
 - ✅ Ignored events with parent state inheritance — 8 tests per runtime
 - ✅ Parallel regions with multi-region state values, per-leaf event dispatch, sync strategies — 12-13 tests per runtime
-- ⏳ `machine.restore()` — implemented in orca-lang XState runtime only, not in standalone runtimes
+- ✅ Snapshot/restore with deep-copy semantics and timeout management — 9 tests per runtime
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
@@ -92,7 +92,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - **src/verifier/structural.ts** - Reachability, deadlock, orphan detection; `analyzeMachine()` builds the `MachineAnalysis` object
 - **src/verifier/completeness.ts** - Checks every (state, event) pair is handled or explicitly ignored
 - **src/verifier/determinism.ts** - Checks guards on multi-transition pairs are mutually exclusive; handles negation pairs, complementary comparisons (`<` vs `>=`, `==` vs `!=`), numeric range exclusion, nullcheck vs compare exclusivity, and AND/OR structural analysis
-- **src/verifier/properties.ts** - Property specification & bounded model checking: BFS-based reachability, exclusion, pass-through, liveness, bounded response, context invariants (advisory), machine size limit enforcement
+- **src/verifier/properties.ts** - Property specification & guard-aware bounded model checking: BFS-based reachability, exclusion, pass-through, liveness, bounded response, context invariants (advisory), machine size limit enforcement, statically-false guard pruning
 - **src/compiler/xstate.ts** - Compiles AST to XState v5 `createMachine()` config
 - **src/compiler/mermaid.ts** - Compiles AST to Mermaid `stateDiagram-v2`
 - **src/runtime/effects.ts** - Effect routing types (Phase 2.7 complete - XState scaffolding)
@@ -114,7 +114,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 2.5 | ✅ Complete | CLI skills (`/generate-orca`, `/verify-orca`, etc.) |
 | Phase 2.7 | ✅ Complete | Both runtimes work — guards, actions, and timeouts all implemented |
 | Phase 2.8 | ✅ Complete | Two demos: `orca-demo-ts` (text adventure) and `orca-demo-python` (agent framework) |
-| Phase 3 | ✅ Complete | Hierarchical states, parallel regions, property specification & bounded model checking |
+| Phase 3 | ✅ Complete | Hierarchical states, parallel regions, property specification & guard-aware bounded model checking, snapshot/restore |
 | Phase 3.5 | ⏳ Not started | Markdown syntax migration — replace custom DSL with `.orca.md` format using tables, headers, and lists for LLM-native generation |
 | Phase 4 | ⏳ Not started | Additional compilation targets — Go is next priority (TypeScript and Python runtimes already exist) |
 | Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-machine composition) |
@@ -129,7 +129,8 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 **Phase 3 detail — all complete:**
 - ✅ Hierarchical (nested) states — parser, verifier (flattening + compound state handling), XState compilation
 - ✅ Parallel regions — parser, verifier (flattening, completeness with simple-name lookup), XState compilation (`type: 'parallel'`, `onDone`), Mermaid (`--` separator), sync strategies (`all-final` default, `any-final`, `custom`), both runtimes (TS + Python) with multi-region state values, per-leaf event dispatch, and sync-triggered `on_done` transitions
-- ✅ Property specification & bounded model checking — 6 property types (`reachable`, `unreachable`, `passes_through`, `live`, `responds`, `invariant`), BFS-based model checker with counterexample traces, machine size limit (64 states), integrated into verify pipeline and skills
+- ✅ Property specification & guard-aware bounded model checking — 6 property types (`reachable`, `unreachable`, `passes_through`, `live`, `responds`, `invariant`), BFS-based model checker with counterexample traces, guard-aware transition pruning (statically-false guards skipped), machine size limit (64 states), integrated into verify pipeline and skills
+- ✅ Snapshot/restore — deep-copy state + context, timeout cancellation/restart, both runtimes (TS + Python) with 9 tests each
 
 **Phase 3.5 detail — Markdown Syntax Migration:**
 - ⏳ Formalize markdown grammar spec (required headings, table shapes, conventions)

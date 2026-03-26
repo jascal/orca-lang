@@ -111,6 +111,39 @@ class OrcaMachine:
         """Whether the machine is running."""
         return self._active
 
+    def snapshot(self) -> dict[str, Any]:
+        """
+        Capture the current machine state as a serializable snapshot.
+        The snapshot includes state value, context, and timestamp.
+        Action handlers are NOT included — re-register them after restore.
+        """
+        import copy
+        import time
+        state_val = self._state.value
+        return {
+            "state": copy.deepcopy(state_val),
+            "context": copy.deepcopy(self.context),
+            "timestamp": time.time(),
+        }
+
+    async def restore(self, snap: dict[str, Any]) -> None:
+        """
+        Restore machine state from a previously captured snapshot.
+        Action handlers must be re-registered after restore.
+        """
+        import copy
+        # Cancel any active timeout
+        self._cancel_timeout()
+
+        # Restore state and context
+        self._state = StateValue(copy.deepcopy(snap["state"]))
+        self.context = copy.deepcopy(snap["context"])
+
+        # If machine was active, restart timeouts for current leaf states
+        if self._active:
+            for leaf in self._state.leaves():
+                self._start_timeout_for_state(leaf)
+
     def register_action(self, name: str, handler: ActionHandler) -> None:
         """Register a handler for a plain (non-effect) action."""
         self._action_handlers[name] = handler

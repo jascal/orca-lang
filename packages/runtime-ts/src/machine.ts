@@ -88,6 +88,46 @@ export class OrcaMachine {
     return this.active;
   }
 
+  /**
+   * Capture the current machine state as a serializable snapshot.
+   * The snapshot includes state value, context, and timestamp.
+   * Action handlers are NOT included — re-register them after restore.
+   */
+  snapshot(): { state: string | Record<string, unknown>; context: Record<string, unknown>; timestamp: number } {
+    return {
+      state: typeof this.state.value === 'string'
+        ? this.state.value
+        : JSON.parse(JSON.stringify(this.state.value)),
+      context: JSON.parse(JSON.stringify(this.context)),
+      timestamp: Date.now(),
+    };
+  }
+
+  /**
+   * Restore machine state from a previously captured snapshot.
+   * The machine must be stopped before restoring. After restore,
+   * call start() to resume. Action handlers must be re-registered.
+   */
+  async restore(snap: { state: string | Record<string, unknown>; context: Record<string, unknown> }): Promise<void> {
+    // Cancel any active timeout
+    this.cancelTimeout();
+
+    // Restore state and context
+    this.state = new StateValue(
+      typeof snap.state === 'string'
+        ? snap.state
+        : JSON.parse(JSON.stringify(snap.state))
+    );
+    this.context = JSON.parse(JSON.stringify(snap.context));
+
+    // If machine was active, restart timeouts for current leaf states
+    if (this.active) {
+      for (const leaf of this.state.leaves()) {
+        this.startTimeoutForState(leaf);
+      }
+    }
+  }
+
   async start(): Promise<void> {
     if (this.active) {
       return;
