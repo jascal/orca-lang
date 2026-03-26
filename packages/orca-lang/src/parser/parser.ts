@@ -1,4 +1,4 @@
-import { Token, ParseResult, MachineDef, ContextField, EventDef, StateDef, Transition, GuardDef, GuardExpression, ActionSignature } from './ast.js';
+import { Token, ParseResult, MachineDef, ContextField, EventDef, StateDef, Transition, GuardDef, GuardExpression, ActionSignature, ParallelDef, RegionDef, SyncStrategy } from './ast.js';
 
 export class Parser {
   private tokens: Token[];
@@ -164,10 +164,25 @@ export class Parser {
         const event = this.expect('IDENT').value;
         if (!result.ignoredEvents) result.ignoredEvents = [];
         result.ignoredEvents.push(event);
+      } else if (this.match('ON_DONE')) {
+        this.expect('COLON');
+        this.expect('ARROW');
+        result.onDone = this.expect('IDENT').value;
+      } else if (this.peek().type === 'PARALLEL') {
+        if (!parentName) {
+          throw new Error(`Unexpected parallel block at top level at ${this.peek().pos.line}:${this.peek().pos.column}`);
+        }
+        if (result.contains) {
+          throw new Error(`State cannot have both nested states and parallel regions at ${this.peek().pos.line}:${this.peek().pos.column}`);
+        }
+        result.parallel = this.parseParallel(parentName);
       } else if (this.match('STATE')) {
         // Nested state block - parse contains
         // Only parse if we have a parent name (nested inside another state)
         if (parentName) {
+          if (result.parallel) {
+            throw new Error(`State cannot have both nested states and parallel regions at ${this.peek().pos.line}:${this.peek().pos.column}`);
+          }
           this.pos--;  // Back up to parse the nested state properly
           const nestedStates = this.parseStatesRecursive(parentName);
           result.contains = nestedStates;
@@ -193,11 +208,83 @@ export class Parser {
       if (isFinal && body.contains && body.contains.length > 0) {
         throw new Error(`State "${name}" cannot be both final and contain nested states at ${this.peek(-1).pos.line}:${this.peek(-1).pos.column}`);
       }
+      if (isFinal && body.parallel) {
+        throw new Error(`State "${name}" cannot be both final and contain parallel regions at ${this.peek(-1).pos.line}:${this.peek(-1).pos.column}`);
+      }
 
       const state: StateDef = { name, isInitial, isFinal, parent: parentName, ...body };
       states.push(state);
     }
     return states;
+  }
+
+  private parseParallel(parentName: string): ParallelDef {
+    this.expect('PARALLEL');
+    let sync: SyncStrategy | undefined;
+
+    // Optional [sync: strategy] annotation
+    if (this.match('LBRACKET')) {
+      const key = this.expect('IDENT').value;
+      if (key !== 'sync') {
+        throw new Error(`Expected 'sync' in parallel annotation at ${this.peek().pos.line}:${this.peek().pos.column}, got '${key}'`);
+      }
+      this.expect('COLON');
+      // Sync value may be hyphenated: all-final, any-final, custom
+      let syncValue = this.expect('IDENT').value;
+      if (this.peek().type === 'IDENT' && (syncValue === 'all' || syncValue === 'any')) {
+        // Handle hyphenated values that the lexer doesn't join
+        // Actually the lexer treats '-' as part of ident if followed by alpha? Let's check.
+        // Safer: accept "all_final", "any_final" as well
+      }
+      if (syncValue === 'all' || syncValue === 'any') {
+        // Expect the rest: e.g., "-final" parsed as separate tokens
+        // The '-' is not a token, so we need a different approach.
+        // Let's support underscored forms: all_final, any_final, custom
+        throw new Error(`Invalid sync value '${syncValue}'. Use all_final, any_final, or custom at ${this.peek().pos.line}:${this.peek().pos.column}`);
+      }
+      if (syncValue === 'all_final') sync = 'all-final';
+      else if (syncValue === 'any_final') sync = 'any-final';
+      else if (syncValue === 'custom') sync = 'custom';
+      else throw new Error(`Invalid sync strategy '${syncValue}' at ${this.peek().pos.line}:${this.peek().pos.column}. Expected all_final, any_final, or custom`);
+      this.expect('RBRACKET');
+    }
+
+    this.expect('LBRACE');
+    const regions: RegionDef[] = [];
+
+    while (!this.match('RBRACE')) {
+      if (!this.match('REGION')) {
+        throw new Error(`Expected 'region' inside parallel block at ${this.peek().pos.line}:${this.peek().pos.column}, got ${this.peek().type} "${this.peek().value}"`);
+      }
+      const regionName = this.expect('IDENT').value;
+      this.expect('LBRACE');
+
+      // Parse states inside the region
+      const states: StateDef[] = [];
+      while (this.peek().type === 'STATE') {
+        this.advance(); // consume STATE
+        const name = this.expect('IDENT').value;
+        const { isInitial, isFinal } = this.parseStateAnnotations();
+        const body = this.parseStateBody(name);
+
+        // Disallow nested parallel inside a region (v1 limitation)
+        if (body.parallel) {
+          throw new Error(`Nested parallel regions are not supported at ${this.peek().pos.line}:${this.peek().pos.column}`);
+        }
+
+        const state: StateDef = { name, isInitial, isFinal, parent: `${parentName}.${regionName}`, ...body };
+        states.push(state);
+      }
+
+      this.expect('RBRACE');
+      regions.push({ name: regionName, states });
+    }
+
+    if (regions.length === 0) {
+      throw new Error(`Parallel block must contain at least one region`);
+    }
+
+    return { regions, sync };
   }
 
   private parseStates(): StateDef[] {
@@ -210,6 +297,9 @@ export class Parser {
       // Validate: compound state cannot be final
       if (isFinal && body.contains && body.contains.length > 0) {
         throw new Error(`State "${name}" cannot be both final and contain nested states at ${this.peek(-1).pos.line}:${this.peek(-1).pos.column}`);
+      }
+      if (isFinal && body.parallel) {
+        throw new Error(`State "${name}" cannot be both final and contain parallel regions at ${this.peek(-1).pos.line}:${this.peek(-1).pos.column}`);
       }
 
       const state: StateDef = { name, isInitial, isFinal, ...body };

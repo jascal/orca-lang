@@ -55,6 +55,7 @@ export type TokenType =
   | 'CONTAINS'
   | 'PARALLEL'
   | 'REGION'
+  | 'ON_DONE'
   | 'EOF'
   | 'UNKNOWN';
 
@@ -79,6 +80,18 @@ export interface EventDef {
   payload?: ContextField[];
 }
 
+export interface RegionDef {
+  name: string;
+  states: StateDef[];
+}
+
+export type SyncStrategy = 'all-final' | 'any-final' | 'custom';
+
+export interface ParallelDef {
+  regions: RegionDef[];
+  sync?: SyncStrategy;  // default: 'all-final'
+}
+
 export interface StateDef {
   name: string;
   description?: string;
@@ -86,11 +99,13 @@ export interface StateDef {
   isFinal: boolean;
   onEntry?: string;
   onExit?: string;
+  onDone?: string;       // target state when parallel sync completes
   timeout?: {
     duration: string;
     target: string;
   };
   contains?: StateDef[];
+  parallel?: ParallelDef;  // mutually exclusive with contains
   parent?: string;  // Parent state name for hierarchical states
   transitions?: Transition[];
   ignoredEvents?: string[];

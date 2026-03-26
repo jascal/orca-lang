@@ -9,9 +9,12 @@ export interface FlattenedState {
   simpleName: string;  // Simple name (e.g., "walking")
   parentName?: string;  // Parent's full name (e.g., "movement")
   isCompound: boolean;  // Has nested states
+  isParallel: boolean;  // Has parallel regions
+  isRegion: boolean;    // Is a region container
   isInitial: boolean;
   isFinal: boolean;
   contains?: FlattenedState[];
+  regionOf?: string;    // Parent parallel state name
 }
 
 /**
@@ -27,12 +30,15 @@ export function flattenStates(states: StateDef[], parentPrefix?: string): Flatte
   for (const state of states) {
     const fullName = parentPrefix ? `${parentPrefix}.${state.name}` : state.name;
     const isCompound = state.contains && state.contains.length > 0;
+    const isParallel = Boolean(state.parallel);
 
     const flattened: FlattenedState = {
       name: fullName,
       simpleName: state.name,
       parentName: parentPrefix,
-      isCompound: Boolean(state.contains && state.contains.length > 0),
+      isCompound: Boolean(isCompound || isParallel),
+      isParallel,
+      isRegion: false,
       isInitial: state.isInitial,
       isFinal: state.isFinal,
     };
@@ -43,9 +49,33 @@ export function flattenStates(states: StateDef[], parentPrefix?: string): Flatte
 
     result.push(flattened);
 
-    // Recursively flatten children
+    // Recursively flatten hierarchical children
     if (isCompound) {
       result.push(...flattened.contains!);
+    }
+
+    // Flatten parallel regions
+    if (state.parallel) {
+      const regionChildren: FlattenedState[] = [];
+      for (const region of state.parallel.regions) {
+        const regionFullName = `${fullName}.${region.name}`;
+        const regionFlattened: FlattenedState = {
+          name: regionFullName,
+          simpleName: region.name,
+          parentName: fullName,
+          isCompound: true,
+          isParallel: false,
+          isRegion: true,
+          isInitial: false,
+          isFinal: false,
+          regionOf: fullName,
+          contains: flattenStates(region.states, regionFullName),
+        };
+        result.push(regionFlattened);
+        result.push(...regionFlattened.contains!);
+        regionChildren.push(regionFlattened);
+      }
+      flattened.contains = regionChildren;
     }
   }
 
@@ -110,7 +140,7 @@ export function analyzeMachine(machine: MachineDef): MachineAnalysis {
 
     // If target is a compound state, redirect to its initial child
     let resolvedTarget = transition.target;
-    if (targetFS?.isCompound) {
+    if (targetFS?.isCompound && !targetFS?.isParallel) {
       const initialChild = findInitialChild(targetFS);
       if (initialChild) {
         resolvedTarget = initialChild.name;
@@ -125,6 +155,25 @@ export function analyzeMachine(machine: MachineDef): MachineAnalysis {
     }
     if (targetInfo) {
       targetInfo.incoming.push(transition);
+    }
+  }
+
+  // Process onDone transitions for parallel states
+  for (const state of machine.states) {
+    if (state.parallel && state.onDone) {
+      const syntheticTransition = {
+        source: state.name,
+        event: '__onDone__',
+        target: state.onDone,
+      };
+      const sourceInfo = stateMap.get(state.name);
+      const targetInfo = stateMap.get(state.onDone);
+      if (sourceInfo) {
+        sourceInfo.outgoing.push(syntheticTransition);
+      }
+      if (targetInfo) {
+        targetInfo.incoming.push(syntheticTransition);
+      }
     }
   }
 
@@ -170,7 +219,7 @@ export function analyzeMachine(machine: MachineDef): MachineAnalysis {
   };
 }
 
-// Helper to find original state in nested structure
+// Helper to find original state in nested structure (including parallel regions)
 function findOriginalState(states: StateDef[], name: string, parentName?: string): StateDef | undefined {
   if (!parentName) {
     return states.find(s => s.name === name);
@@ -184,17 +233,36 @@ function findOriginalState(states: StateDef[], name: string, parentName?: string
       const found = findOriginalState(state.contains, name, parentName);
       if (found) return found;
     }
+    if (state.parallel) {
+      for (const region of state.parallel.regions) {
+        // Check if parentName matches "stateName.regionName"
+        const regionFullName: string = `${state.name}.${region.name}`;
+        if (regionFullName === parentName) {
+          return region.states.find(s => s.name === name);
+        }
+        // Recurse into region states
+        const found = findOriginalState(region.states, name, parentName);
+        if (found) return found;
+      }
+    }
   }
   return undefined;
 }
 
-// Helper to collect actions from state and nested states
+// Helper to collect actions from state and nested states (including parallel regions)
 function collectActionsFromState(state: StateDef, actions: Set<string>): void {
   if (state.onEntry) actions.add(state.onEntry);
   if (state.onExit) actions.add(state.onExit);
   if (state.contains) {
     for (const child of state.contains) {
       collectActionsFromState(child, actions);
+    }
+  }
+  if (state.parallel) {
+    for (const region of state.parallel.regions) {
+      for (const child of region.states) {
+        collectActionsFromState(child, actions);
+      }
     }
   }
 }

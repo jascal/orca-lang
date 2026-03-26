@@ -200,11 +200,17 @@ export class OrcaMachine {
     }
 
     // Update state
-    if (this.isCompoundState(newStateName)) {
+    if (this.isParallelState(newStateName)) {
+      this.state = new StateValue(this.buildParallelStateValue(newStateName));
+    } else if (this.isCompoundState(newStateName)) {
       const initialChild = this.getInitialChild(newStateName);
       this.state = new StateValue({ [newStateName]: { [initialChild]: {} } });
     } else {
-      this.state = new StateValue(newStateName);
+      // Check if we're inside a parallel state and need to update just one region
+      const updatedInRegion = this.tryUpdateParallelRegion(newStateName);
+      if (!updatedInRegion) {
+        this.state = new StateValue(newStateName);
+      }
     }
 
     // Publish transition started
@@ -220,10 +226,26 @@ export class OrcaMachine {
     });
 
     // Execute entry actions for new state
-    await this.executeEntryActions(newStateName);
+    if (this.isParallelState(newStateName)) {
+      // Execute entry actions for all region initial states
+      const stateDef = this.findStateDefDeep(newStateName);
+      if (stateDef?.parallel) {
+        for (const region of stateDef.parallel.regions) {
+          const initialChild = region.states.find(s => s.isInitial) || region.states[0];
+          await this.executeEntryActions(initialChild.name);
+        }
+      }
+    } else {
+      await this.executeEntryActions(newStateName);
+    }
 
     // Start timeout for new state if defined
-    this.startTimeoutForState(this.state.leaf());
+    for (const leaf of this.state.leaves()) {
+      this.startTimeoutForState(leaf);
+    }
+
+    // Check parallel sync condition
+    await this.checkParallelSync();
 
     // Notify callback
     if (this.onTransition) {
@@ -276,55 +298,159 @@ export class OrcaMachine {
   }
 
   private findTransition(event: Event): Transition | null {
-    const current = this.state.leaf();
     const eventKey = event.eventName ?? event.type;
 
-    // Try direct match on current state
-    for (const t of this.definition.transitions) {
-      if (t.source === current && t.event === eventKey) {
-        return t;
-      }
-    }
-
-    // For compound states, also check parent's transitions
-    let parent = this.getParentState(current);
-    while (parent) {
+    // Check all active leaf states (important for parallel states)
+    for (const current of this.state.leaves()) {
+      // Try direct match on current leaf state
       for (const t of this.definition.transitions) {
-        if (t.source === parent && t.event === eventKey) {
+        if (t.source === current && t.event === eventKey) {
           return t;
         }
       }
-      parent = this.getParentState(parent);
+
+      // For compound states, also check parent's transitions
+      let parent = this.getParentState(current);
+      while (parent) {
+        for (const t of this.definition.transitions) {
+          if (t.source === parent && t.event === eventKey) {
+            return t;
+          }
+        }
+        parent = this.getParentState(parent);
+      }
     }
 
     return null;
   }
 
   private getParentState(stateName: string): string | null {
-    for (const state of this.definition.states) {
-      if (state.name === stateName) {
-        return state.parent ?? null;
-      }
-      if (state.contains) {
-        for (const child of state.contains) {
-          if (child.name === stateName) {
-            return state.name;
+    const search = (states: StateDef[], parentName?: string): string | null => {
+      for (const state of states) {
+        if (state.name === stateName) {
+          return state.parent ?? parentName ?? null;
+        }
+        if (state.contains && state.contains.length > 0) {
+          for (const child of state.contains) {
+            if (child.name === stateName) return state.name;
+          }
+          const found = search(state.contains, state.name);
+          if (found) return found;
+        }
+        if (state.parallel) {
+          for (const region of state.parallel.regions) {
+            for (const child of region.states) {
+              if (child.name === stateName) return state.name;
+            }
           }
         }
       }
-    }
-    return null;
+      return null;
+    };
+    return search(this.definition.states);
   }
 
   private isCompoundState(stateName: string): boolean {
-    for (const state of this.definition.states) {
-      if (state.name === stateName) {
-        return state.contains !== undefined && state.contains.length > 0;
+    const state = this.findStateDefDeep(stateName);
+    if (!state) return false;
+    return (state.contains !== undefined && state.contains.length > 0) || !!state.parallel;
+  }
+
+  private isParallelState(stateName: string): boolean {
+    const state = this.findStateDefDeep(stateName);
+    return !!state?.parallel;
+  }
+
+  private getInitialChild(parentName: string): string {
+    const state = this.findStateDefDeep(parentName);
+    if (state?.contains && state.contains.length > 0) {
+      for (const child of state.contains) {
+        if (child.isInitial) return child.name;
       }
-      if (state.contains) {
-        for (const child of state.contains) {
-          if (child.name === stateName) {
-            return false;
+      return state.contains[0].name;
+    }
+    return parentName;
+  }
+
+  /** Search all states including nested and parallel region states */
+  private findStateDefDeep(stateName: string): StateDef | null {
+    const search = (states: StateDef[]): StateDef | null => {
+      for (const state of states) {
+        if (state.name === stateName) return state;
+        if (state.contains && state.contains.length > 0) {
+          const found = search(state.contains);
+          if (found) return found;
+        }
+        if (state.parallel) {
+          for (const region of state.parallel.regions) {
+            const found = search(region.states);
+            if (found) return found;
+          }
+        }
+      }
+      return null;
+    };
+    return search(this.definition.states);
+  }
+
+  /** Build the StateValue for entering a parallel state */
+  private buildParallelStateValue(stateName: string): Record<string, unknown> {
+    const state = this.findStateDefDeep(stateName);
+    if (!state?.parallel) return { [stateName]: {} };
+
+    const regions: Record<string, unknown> = {};
+    for (const region of state.parallel.regions) {
+      const initialChild = region.states.find(s => s.isInitial) || region.states[0];
+      regions[region.name] = { [initialChild.name]: {} };
+    }
+    return { [stateName]: regions };
+  }
+
+  /** Check if all regions of a parallel state have reached their final states */
+  private allRegionsFinal(stateName: string): boolean {
+    const state = this.findStateDefDeep(stateName);
+    if (!state?.parallel) return false;
+
+    const currentLeaves = this.state.leaves();
+    for (const region of state.parallel.regions) {
+      const finalStates = region.states.filter(s => s.isFinal).map(s => s.name);
+      const regionHasFinal = currentLeaves.some(leaf => finalStates.includes(leaf));
+      if (!regionHasFinal) return false;
+    }
+    return true;
+  }
+
+  /** Check if any region of a parallel state has reached a final state */
+  private anyRegionFinal(stateName: string): boolean {
+    const state = this.findStateDefDeep(stateName);
+    if (!state?.parallel) return false;
+
+    const currentLeaves = this.state.leaves();
+    for (const region of state.parallel.regions) {
+      const finalStates = region.states.filter(s => s.isFinal).map(s => s.name);
+      if (currentLeaves.some(leaf => finalStates.includes(leaf))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * When transitioning to a state inside a parallel region,
+   * update only that region's sub-state in the current StateValue.
+   */
+  private tryUpdateParallelRegion(targetStateName: string): boolean {
+    if (typeof this.state.value !== "object") return false;
+
+    // Find which parallel state/region contains the target
+    for (const topState of this.definition.states) {
+      if (!topState.parallel) continue;
+      for (const region of topState.parallel.regions) {
+        const inRegion = region.states.some(s => s.name === targetStateName);
+        if (inRegion) {
+          // Update just this region in the compound state value
+          const stateObj = this.state.value as Record<string, Record<string, unknown>>;
+          if (stateObj[topState.name]) {
+            stateObj[topState.name][region.name] = { [targetStateName]: {} };
+            return true;
           }
         }
       }
@@ -332,18 +458,34 @@ export class OrcaMachine {
     return false;
   }
 
-  private getInitialChild(parentName: string): string {
+  /** Check if any parallel state's sync condition is met and transition via onDone */
+  private async checkParallelSync(): Promise<void> {
     for (const state of this.definition.states) {
-      if (state.name === parentName && state.contains) {
-        for (const child of state.contains) {
-          if (child.isInitial) {
-            return child.name;
-          }
+      if (!state.parallel || !state.onDone) continue;
+
+      const sync = state.parallel.sync ?? 'all-final';
+      let shouldTransition = false;
+
+      if (sync === 'all-final') {
+        shouldTransition = this.allRegionsFinal(state.name);
+      } else if (sync === 'any-final') {
+        shouldTransition = this.anyRegionFinal(state.name);
+      }
+      // 'custom' — no automatic transition
+
+      if (shouldTransition) {
+        const oldState = new StateValue(this.state.value);
+        this.cancelTimeout();
+        this.state = new StateValue(state.onDone);
+
+        await this.executeEntryActions(state.onDone);
+        this.startTimeoutForState(this.state.leaf());
+
+        if (this.onTransition) {
+          await this.onTransition(oldState, this.state);
         }
-        return state.contains[0].name;
       }
     }
-    return parentName;
   }
 
   private async evaluateGuard(guardName: string): Promise<boolean> {
@@ -566,19 +708,7 @@ export class OrcaMachine {
   }
 
   private findStateDef(stateName: string): StateDef | null {
-    for (const state of this.definition.states) {
-      if (state.name === stateName) {
-        return state;
-      }
-      if (state.contains) {
-        for (const child of state.contains) {
-          if (child.name === stateName) {
-            return child;
-          }
-        }
-      }
-    }
-    return null;
+    return this.findStateDefDeep(stateName);
   }
 
   private isEventIgnored(eventName: string): boolean {

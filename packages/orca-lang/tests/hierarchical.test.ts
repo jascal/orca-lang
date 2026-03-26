@@ -4,6 +4,7 @@ import { parse } from '../src/parser/parser.js';
 import { checkStructural, analyzeMachine, flattenStates } from '../src/verifier/structural.js';
 import { checkCompleteness } from '../src/verifier/completeness.js';
 import { compileToXState, compileToXStateMachine } from '../src/compiler/xstate.js';
+import { compileToMermaid } from '../src/compiler/mermaid.js';
 
 function parseMachine(source: string) {
   return parse(tokenize(source)).machine;
@@ -253,6 +254,55 @@ describe('Hierarchical XState Compiler', () => {
 
     // Final state should have type: 'final'
     expect(compiled.config.states.done.type).toBe('final');
+  });
+});
+
+describe('Hierarchical Mermaid Compiler', () => {
+  it('renders compound states with nesting syntax', () => {
+    const machine = parseMachine(HIERARCHICAL_SOURCE);
+    const output = compileToMermaid(machine);
+
+    expect(output).toContain('state playing {');
+    expect(output).toContain('[*] --> exploring');
+    expect(output).toContain('done --> [*]');
+  });
+
+  it('renders initial transition inside compound block', () => {
+    const machine = parseMachine(HIERARCHICAL_SOURCE);
+    const output = compileToMermaid(machine);
+
+    // The initial child of 'playing' is 'exploring'
+    const lines = output.split('\n');
+    const playingLine = lines.findIndex(l => l.includes('state playing {'));
+    const innerInitial = lines.findIndex((l, i) => i > playingLine && l.includes('[*] --> exploring'));
+    expect(innerInitial).toBeGreaterThan(playingLine);
+  });
+
+  it('preserves top-level transitions', () => {
+    const machine = parseMachine(HIERARCHICAL_SOURCE);
+    const output = compileToMermaid(machine);
+
+    expect(output).toContain('menu --> playing : start');
+    expect(output).toContain('playing --> playing : move / handle_move');
+  });
+
+  it('renders deeply nested compound states', () => {
+    const machine = parseMachine(`
+machine Deep
+context {}
+events { go }
+state top [initial] {
+  state mid [initial] {
+    state leaf [initial] {}
+  }
+}
+state end [final] {}
+transitions { top + go -> end : _ }
+`);
+    const output = compileToMermaid(machine);
+    expect(output).toContain('state top {');
+    expect(output).toContain('state mid {');
+    expect(output).toContain('[*] --> leaf');
   });
 });
 

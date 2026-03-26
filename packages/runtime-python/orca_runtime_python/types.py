@@ -13,6 +13,20 @@ Context = dict[str, Any]
 
 
 @dataclass
+class RegionDef:
+    """Region definition inside a parallel state."""
+    name: str
+    states: list[StateDef] = field(default_factory=list)
+
+
+@dataclass
+class ParallelDef:
+    """Parallel regions definition."""
+    regions: list[RegionDef] = field(default_factory=list)
+    sync: str | None = None  # all-final, any-final, custom
+
+
+@dataclass
 class StateDef:
     """State definition in an Orca machine."""
     name: str
@@ -20,8 +34,10 @@ class StateDef:
     is_final: bool = False
     on_entry: str | None = None
     on_exit: str | None = None
+    on_done: str | None = None
     description: str | None = None
     contains: list[StateDef] = field(default_factory=list)
+    parallel: ParallelDef | None = None
     parent: str | None = None
     timeout: dict[str, str] | None = None  # {duration, target}
     ignored_events: list[str] = field(default_factory=list)
@@ -216,6 +232,24 @@ class StateValue:
                     # Empty dict or non-dict value - 'key' is the leaf
                     return key
         return str(self.value)
+
+    def leaves(self) -> list[str]:
+        """Get all leaf state names (one per active region in parallel states)."""
+        if isinstance(self.value, str):
+            return [self.value]
+
+        result: list[str] = []
+
+        def collect_leaves(obj: dict[str, Any]) -> None:
+            for key, val in obj.items():
+                if isinstance(val, dict) and val:
+                    collect_leaves(val)
+                else:
+                    result.append(key)
+
+        if isinstance(self.value, dict):
+            collect_leaves(self.value)
+        return result if result else [str(self.value)]
 
     def parent_names(self) -> list[str]:
         """Get all parent state names (for nested states)."""

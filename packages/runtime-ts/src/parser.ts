@@ -12,6 +12,9 @@ import type {
   GuardExpression,
   VariableRef,
   ValueRef,
+  RegionDef,
+  ParallelDef,
+  SyncStrategy,
 } from "./types.js";
 import { StateValue } from "./types.js";
 
@@ -243,11 +246,22 @@ function parseState(lines: string[], start: number): ParseStateResult {
       const eventsStr = bodyLine.replace(/^ignore:\s*/, "");
       const ignored = eventsStr.split(",").map((e) => e.trim()).filter(Boolean);
       state.ignoredEvents.push(...ignored);
+    } else if (bodyLine.startsWith("on_done:")) {
+      const m = bodyLine.match(/^on_done:\s*->\s*(\w+)/);
+      if (m) {
+        state.onDone = m[1];
+      }
     }
   }
 
-  // Parse nested states directly from bodyLines
-  if (nestedStateLines.length > 0) {
+  // Parse parallel block from bodyLines
+  const parallelResult = parseParallelBlock(bodyLines, name);
+  if (parallelResult) {
+    state.parallel = parallelResult;
+  }
+
+  // Parse nested states directly from bodyLines (only if no parallel)
+  if (!state.parallel && nestedStateLines.length > 0) {
     const nestedStates = parseNestedStates(bodyLines, name);
     if (nestedStates.length > 0) {
       state.contains = nestedStates;
@@ -367,11 +381,22 @@ function parseNestedState(bodyLines: string[], start: number): { state: StateDef
       const eventsStr = bodyLine.replace(/^ignore:\s*/, "");
       const ignored = eventsStr.split(",").map((e) => e.trim()).filter(Boolean);
       state.ignoredEvents.push(...ignored);
+    } else if (bodyLine.startsWith("on_done:")) {
+      const m = bodyLine.match(/^on_done:\s*->\s*(\w+)/);
+      if (m) {
+        state.onDone = m[1];
+      }
     }
   }
 
-  // Recursively parse nested states
-  if (innerNestedLines.length > 0) {
+  // Parse parallel block from body content
+  const parallelResult = parseParallelBlock(bodyContent, name);
+  if (parallelResult) {
+    state.parallel = parallelResult;
+  }
+
+  // Recursively parse nested states (only if no parallel)
+  if (!state.parallel && innerNestedLines.length > 0) {
     const innerNested = parseNestedStates(bodyContent, name);
     if (innerNested.length > 0) {
       state.contains = innerNested;
@@ -380,6 +405,83 @@ function parseNestedState(bodyLines: string[], start: number): { state: StateDef
 
   const consumed = bodyEnd - start;
   return { state, consumed };
+}
+
+function parseParallelBlock(bodyLines: string[], parentName: string): ParallelDef | null {
+  // Find the "parallel" line
+  let parallelStart = -1;
+  let sync: SyncStrategy | undefined;
+
+  for (let i = 0; i < bodyLines.length; i++) {
+    const line = bodyLines[i].trim();
+    if (line.startsWith("parallel")) {
+      parallelStart = i;
+      // Check for sync annotation: parallel [sync: all_final] {
+      const syncMatch = line.match(/\[sync:\s*(\w+)\]/);
+      if (syncMatch) {
+        const val = syncMatch[1];
+        if (val === "all_final") sync = "all-final";
+        else if (val === "any_final") sync = "any-final";
+        else if (val === "custom") sync = "custom";
+      }
+      break;
+    }
+  }
+
+  if (parallelStart === -1) return null;
+
+  // Collect all lines inside the parallel block
+  let braceCount = 0;
+  let blockStart = parallelStart;
+  const parallelLines: string[] = [];
+
+  for (let i = parallelStart; i < bodyLines.length; i++) {
+    const line = bodyLines[i].trim();
+    braceCount += (line.match(/{/g) || []).length - (line.match(/}/g) || []).length;
+    if (i > parallelStart) {
+      parallelLines.push(line);
+    }
+    if (braceCount === 0 && i > parallelStart) break;
+  }
+
+  // Parse regions from the parallel lines
+  const regions: RegionDef[] = [];
+  let i = 0;
+
+  while (i < parallelLines.length) {
+    const line = parallelLines[i].trim();
+    if (line.startsWith("region ")) {
+      const nameMatch = line.match(/^region\s+(\w+)/);
+      if (nameMatch) {
+        const regionName = nameMatch[1];
+
+        // Collect region body lines (exclude the closing } of the region itself)
+        let regionBraceCount = 0;
+        const regionBodyLines: string[] = [];
+        let j = i;
+        for (; j < parallelLines.length; j++) {
+          const rLine = parallelLines[j].trim();
+          regionBraceCount += (rLine.match(/{/g) || []).length - (rLine.match(/}/g) || []).length;
+          if (j > i && regionBraceCount > 0) regionBodyLines.push(rLine);
+          if (regionBraceCount === 0 && j > i) break;
+        }
+
+        // Parse states from region body
+        const regionStates = parseNestedStates(
+          regionBodyLines,
+          `${parentName}.${regionName}`
+        );
+
+        regions.push({ name: regionName, states: regionStates });
+        i = j + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+
+  if (regions.length === 0) return null;
+  return { regions, sync };
 }
 
 function parseContext(content: string): Record<string, unknown> {

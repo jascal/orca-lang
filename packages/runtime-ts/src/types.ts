@@ -4,14 +4,28 @@
 
 export type Context = Record<string, unknown>;
 
+export interface RegionDef {
+  name: string;
+  states: StateDef[];
+}
+
+export type SyncStrategy = 'all-final' | 'any-final' | 'custom';
+
+export interface ParallelDef {
+  regions: RegionDef[];
+  sync?: SyncStrategy;
+}
+
 export interface StateDef {
   name: string;
   isInitial: boolean;
   isFinal: boolean;
   onEntry?: string;
   onExit?: string;
+  onDone?: string;
   description?: string;
   contains: StateDef[];
+  parallel?: ParallelDef;
   parent?: string;
   timeout?: { duration: string; target: string };
   ignoredEvents: string[];
@@ -178,6 +192,26 @@ export class StateValue {
     }
 
     return String(this.value);
+  }
+
+  /** Returns all leaf state names (one per active region in parallel states). */
+  leaves(): string[] {
+    if (typeof this.value === "string") {
+      return [this.value];
+    }
+
+    const result: string[] = [];
+    const collectLeaves = (obj: Record<string, unknown>): void => {
+      for (const [key, val] of Object.entries(obj)) {
+        if (typeof val === "object" && val !== null && Object.keys(val).length > 0) {
+          collectLeaves(val as Record<string, unknown>);
+        } else {
+          result.push(key);
+        }
+      }
+    };
+    collectLeaves(this.value);
+    return result.length > 0 ? result : [String(this.value)];
   }
 
   parentNames(): string[] {

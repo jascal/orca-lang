@@ -111,7 +111,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 2.5 | ✅ Complete | CLI skills (`/generate-orca`, `/verify-orca`, etc.) |
 | Phase 2.7 | ✅ Complete | Both runtimes work — guards, actions, and timeouts all implemented |
 | Phase 2.8 | ✅ Complete | Two demos: `orca-demo-ts` (text adventure) and `orca-demo-python` (agent framework) |
-| Phase 3 | ✅ Partial | Hierarchical states complete in `orca-lang`; parallel regions and property checking not yet implemented |
+| Phase 3 | ✅ Mostly Complete | Hierarchical states and parallel regions complete across all packages; property specification/bounded model checking not yet implemented |
 | Phase 3.5 | ⏳ Not started | Markdown syntax migration — replace custom DSL with `.orca.md` format using tables, headers, and lists for LLM-native generation |
 | Phase 4 | ⏳ Not started | Additional compilation targets — Go is next priority (TypeScript and Python runtimes already exist) |
 | Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-machine composition) |
@@ -126,7 +126,7 @@ import { parseOrca, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 
 **Phase 3 detail — what's done vs pending:**
 - ✅ Hierarchical (nested) states — parser, verifier (flattening + compound state handling), XState compilation
-- ⏳ Parallel regions — `PARALLEL`/`REGION` keywords in lexer/AST only, no implementation
+- ✅ Parallel regions — parser, verifier (flattening, completeness with simple-name lookup), XState compilation (`type: 'parallel'`, `onDone`), Mermaid (`--` separator), sync strategies (`all-final` default, `any-final`, `custom`), both runtimes (TS + Python) with multi-region state values, per-leaf event dispatch, and sync-triggered `on_done` transitions
 - ⏳ Property specification / bounded model checking
 
 **Phase 3.5 detail — Markdown Syntax Migration:**
@@ -158,3 +158,4 @@ orca /refine-orca examples/payment-processor.orca
 - `examples/payment-processor.orca` - Full payment flow with guards and effects
 - `examples/text-adventure.orca` - Game engine with multiple states and guards
 - `examples/hierarchical-game.orca` - Hierarchical states: compound exploration/combat/inventory with nested children
+- `examples/parallel-order.orca` - Parallel regions: order processing with payment and notification flows running concurrently, `on_done` sync

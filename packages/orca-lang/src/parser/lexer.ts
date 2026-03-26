@@ -18,6 +18,7 @@ const KEYWORDS: Record<string, TokenType> = {
   contains: 'CONTAINS',
   parallel: 'PARALLEL',
   region: 'REGION',
+  on_done: 'ON_DONE',
 };
 
 const OPERATORS: Record<string, TokenType> = {

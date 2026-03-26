@@ -232,12 +232,17 @@ class OrcaMachine:
             await self._execute_action(transition.action, evt.payload)
 
         # Update state
-        if self._is_compound_state(new_state_name):
+        if self._is_parallel_state(new_state_name):
+            self._state = StateValue(self._build_parallel_state_value(new_state_name))
+        elif self._is_compound_state(new_state_name):
             # Enter compound state at its initial child
             initial_child = self._get_initial_child(new_state_name)
             self._state = StateValue({new_state_name: {initial_child: {}}})
         else:
-            self._state = StateValue(new_state_name)
+            # Check if we're inside a parallel state and need to update just one region
+            updated_in_region = self._try_update_parallel_region(new_state_name)
+            if not updated_in_region:
+                self._state = StateValue(new_state_name)
 
         # Publish transition started
         await self.event_bus.publish(Event(
@@ -251,10 +256,26 @@ class OrcaMachine:
         ))
 
         # Execute entry actions for new state
-        await self._execute_entry_actions(new_state_name)
+        if self._is_parallel_state(new_state_name):
+            # Execute entry actions for all region initial states
+            state_def = self._find_state_def_deep(new_state_name)
+            if state_def and state_def.parallel:
+                for region in state_def.parallel.regions:
+                    initial_child = next(
+                        (s for s in region.states if s.is_initial),
+                        region.states[0] if region.states else None
+                    )
+                    if initial_child:
+                        await self._execute_entry_actions(initial_child.name)
+        else:
+            await self._execute_entry_actions(new_state_name)
 
-        # Start timeout for new state if defined
-        self._start_timeout_for_state(self._state.leaf())
+        # Start timeout for all active leaf states
+        for leaf in self._state.leaves():
+            self._start_timeout_for_state(leaf)
+
+        # Check parallel sync condition
+        await self._check_parallel_sync()
 
         # Notify callback
         if self.on_transition:
@@ -305,58 +326,141 @@ class OrcaMachine:
 
     def _find_transition(self, event: Event) -> Transition | None:
         """Find a transition matching the current state and event."""
-        current = self._state.leaf()
-
-        # Use event_name for matching if available, otherwise use type.value
         event_key = event.event_name or event.type.value
 
-        # Try direct match on current state
-        for t in self.definition.transitions:
-            if t.source == current and t.event == event_key:
-                return t
-
-        # For compound states, also check parent's transitions
-        # Transitions on parent fire from any child
-        parent = self._get_parent_state(current)
-        while parent:
+        # Check all active leaf states (important for parallel states)
+        for current in self._state.leaves():
+            # Try direct match on current leaf state
             for t in self.definition.transitions:
-                if t.source == parent and t.event == event_key:
+                if t.source == current and t.event == event_key:
                     return t
-            parent = self._get_parent_state(parent)
+
+            # For compound states, also check parent's transitions
+            # Transitions on parent fire from any child
+            parent = self._get_parent_state(current)
+            while parent:
+                for t in self.definition.transitions:
+                    if t.source == parent and t.event == event_key:
+                        return t
+                parent = self._get_parent_state(parent)
 
         return None
 
     def _get_parent_state(self, state_name: str) -> str | None:
-        """Get parent state name if state is nested."""
-        for state in self.definition.states:
-            if state.name == state_name:
-                return state.parent
-            if state.contains:
-                for child in state.contains:
-                    if child.name == state_name:
-                        return state.name
-        return None
+        """Get parent state name if state is nested (searches parallel regions too)."""
+        def search(states: list[StateDef], parent_name: str | None = None) -> str | None:
+            for state in states:
+                if state.name == state_name:
+                    return state.parent or parent_name
+                if state.contains:
+                    for child in state.contains:
+                        if child.name == state_name:
+                            return state.name
+                    found = search(state.contains, state.name)
+                    if found is not None:
+                        return found
+                if state.parallel:
+                    for region in state.parallel.regions:
+                        for child in region.states:
+                            if child.name == state_name:
+                                return state.name
+            return None
+        return search(self.definition.states)
 
     def _is_compound_state(self, state_name: str) -> bool:
-        """Check if a state has nested children."""
-        for state in self.definition.states:
-            if state.name == state_name:
-                return bool(state.contains)
-            if state.contains:
-                for child in state.contains:
-                    if child.name == state_name:
-                        return False  # Child states are not compound
-        return False
+        """Check if a state has nested children or parallel regions."""
+        state = self._find_state_def_deep(state_name)
+        if not state:
+            return False
+        return bool(state.contains) or bool(state.parallel)
+
+    def _is_parallel_state(self, state_name: str) -> bool:
+        """Check if a state has parallel regions."""
+        state = self._find_state_def_deep(state_name)
+        return bool(state and state.parallel)
 
     def _get_initial_child(self, parent_name: str) -> str:
         """Get the initial child state name of a compound state."""
-        for state in self.definition.states:
-            if state.name == parent_name and state.contains:
-                for child in state.contains:
-                    if child.is_initial:
-                        return child.name
-                return state.contains[0].name
+        state = self._find_state_def_deep(parent_name)
+        if state and state.contains:
+            for child in state.contains:
+                if child.is_initial:
+                    return child.name
+            return state.contains[0].name
         return parent_name
+
+    def _build_parallel_state_value(self, state_name: str) -> dict:
+        """Build the StateValue dict for entering a parallel state."""
+        state = self._find_state_def_deep(state_name)
+        if not state or not state.parallel:
+            return {state_name: {}}
+        regions = {}
+        for region in state.parallel.regions:
+            initial_child = next(
+                (s for s in region.states if s.is_initial),
+                region.states[0] if region.states else None
+            )
+            if initial_child:
+                regions[region.name] = {initial_child.name: {}}
+        return {state_name: regions}
+
+    def _try_update_parallel_region(self, target_state_name: str) -> bool:
+        """Update only the relevant region in a parallel state value."""
+        if not isinstance(self._state.value, dict):
+            return False
+        for top_state in self.definition.states:
+            if not top_state.parallel:
+                continue
+            for region in top_state.parallel.regions:
+                in_region = any(s.name == target_state_name for s in region.states)
+                if in_region and top_state.name in self._state.value:
+                    self._state.value[top_state.name][region.name] = {target_state_name: {}}
+                    return True
+        return False
+
+    def _all_regions_final(self, state_name: str) -> bool:
+        """Check if all regions of a parallel state have reached final states."""
+        state = self._find_state_def_deep(state_name)
+        if not state or not state.parallel:
+            return False
+        current_leaves = self._state.leaves()
+        for region in state.parallel.regions:
+            final_names = [s.name for s in region.states if s.is_final]
+            if not any(leaf in final_names for leaf in current_leaves):
+                return False
+        return True
+
+    def _any_region_final(self, state_name: str) -> bool:
+        """Check if any region of a parallel state has reached a final state."""
+        state = self._find_state_def_deep(state_name)
+        if not state or not state.parallel:
+            return False
+        current_leaves = self._state.leaves()
+        for region in state.parallel.regions:
+            final_names = [s.name for s in region.states if s.is_final]
+            if any(leaf in final_names for leaf in current_leaves):
+                return True
+        return False
+
+    async def _check_parallel_sync(self) -> None:
+        """Check if any parallel state's sync condition is met and transition via on_done."""
+        for state in self.definition.states:
+            if not state.parallel or not state.on_done:
+                continue
+            sync = state.parallel.sync or "all-final"
+            should_transition = False
+            if sync == "all-final":
+                should_transition = self._all_regions_final(state.name)
+            elif sync == "any-final":
+                should_transition = self._any_region_final(state.name)
+            if should_transition:
+                old_state = StateValue(self._state.value)
+                self._cancel_timeout()
+                self._state = StateValue(state.on_done)
+                await self._execute_entry_actions(state.on_done)
+                self._start_timeout_for_state(self._state.leaf())
+                if self.on_transition:
+                    await self.on_transition(old_state, self._state)
 
     async def _evaluate_guard(self, guard_name: str) -> bool:
         """Evaluate a guard by name."""
@@ -534,7 +638,9 @@ class OrcaMachine:
         await self._execute_exit_actions(from_state)
 
         # Update state
-        if self._is_compound_state(target):
+        if self._is_parallel_state(target):
+            self._state = StateValue(self._build_parallel_state_value(target))
+        elif self._is_compound_state(target):
             initial_child = self._get_initial_child(target)
             self._state = StateValue({target: {initial_child: {}}})
         else:
@@ -552,8 +658,9 @@ class OrcaMachine:
 
         await self._execute_entry_actions(target)
 
-        # Start timeout for the new state
-        self._start_timeout_for_state(self._state.leaf())
+        # Start timeout for all active leaf states
+        for leaf in self._state.leaves():
+            self._start_timeout_for_state(leaf)
 
         if self.on_transition:
             await self.on_transition(old_state, self._state)
@@ -583,15 +690,26 @@ class OrcaMachine:
         return False
 
     def _find_state_def(self, state_name: str) -> StateDef | None:
-        """Find state definition by name (including nested)."""
-        for state in self.definition.states:
-            if state.name == state_name:
-                return state
-            if state.contains:
-                for child in state.contains:
-                    if child.name == state_name:
-                        return child
-        return None
+        """Find state definition by name (including nested and parallel regions)."""
+        return self._find_state_def_deep(state_name)
+
+    def _find_state_def_deep(self, state_name: str) -> StateDef | None:
+        """Search all states including nested and parallel region states."""
+        def search(states: list[StateDef]) -> StateDef | None:
+            for state in states:
+                if state.name == state_name:
+                    return state
+                if state.contains:
+                    found = search(state.contains)
+                    if found:
+                        return found
+                if state.parallel:
+                    for region in state.parallel.regions:
+                        found = search(region.states)
+                        if found:
+                            return found
+            return None
+        return search(self.definition.states)
 
     def _find_action_def(self, action_name: str) -> ActionSignature | None:
         """Find action definition by name."""

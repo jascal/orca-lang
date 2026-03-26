@@ -21,7 +21,10 @@ export function checkCompleteness(machine: MachineDef): VerificationResult {
 
   // Build a map of compound state name -> its child state names
   const compoundChildren = new Map<string, string[]>();
+  // Map from dot-notation name to simple name for transition lookups
+  const simpleNameMap = new Map<string, string>();
   for (const fs of flattenedStates) {
+    simpleNameMap.set(fs.name, fs.simpleName);
     if (fs.parentName) {
       if (!compoundChildren.has(fs.parentName)) {
         compoundChildren.set(fs.parentName, []);
@@ -39,17 +42,19 @@ export function checkCompleteness(machine: MachineDef): VerificationResult {
     // For compound states, we check if ANY child handles the event
     // For leaf states, we check directly
     const isHandledForEvent = (stateName: string, eventName: string): boolean => {
-      // Check direct transitions from this state
+      // Check direct transitions from this state (both full and simple name)
       const directKey = `${stateName}+${eventName}`;
       if (transitionMap.has(directKey)) return true;
+      const simple = simpleNameMap.get(stateName);
+      if (simple && simple !== stateName) {
+        const simpleKey = `${simple}+${eventName}`;
+        if (transitionMap.has(simpleKey)) return true;
+      }
 
       // For compound states, also check if any child has a transition for this event
       const children = compoundChildren.get(stateName);
       if (children) {
         for (const child of children) {
-          const childKey = `${child}+${eventName}`;
-          if (transitionMap.has(childKey)) return true;
-          // Recursively check grandchildren
           if (isHandledForEvent(child, eventName)) return true;
         }
       }

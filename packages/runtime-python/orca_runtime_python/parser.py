@@ -27,6 +27,8 @@ from .types import (
     GuardNullcheck,
     VariableRef,
     ValueRef,
+    RegionDef,
+    ParallelDef,
 )
 
 
@@ -196,9 +198,12 @@ def _parse_state(lines: list[str], start: int) -> tuple[StateDef | None, int, in
 
     # Parse body properties and collect nested state lines
     nested_state_lines: list[str] = []
+    has_parallel = False
     for body_line in body_lines:
         if body_line.startswith("state "):
             nested_state_lines.append(body_line)
+        elif body_line.startswith("parallel"):
+            has_parallel = True
         elif body_line.startswith("description:"):
             state_def.description = body_line.split(":", 1)[1].strip().strip('"')
         elif body_line.startswith("on_entry:"):
@@ -209,6 +214,10 @@ def _parse_state(lines: list[str], start: int) -> tuple[StateDef | None, int, in
             m = re.match(r"on_exit:\s*->\s*(\w+)", body_line)
             if m:
                 state_def.on_exit = m.group(1)
+        elif body_line.startswith("on_done:"):
+            m = re.match(r"on_done:\s*->\s*(\w+)", body_line)
+            if m:
+                state_def.on_done = m.group(1)
         elif body_line.startswith("timeout:"):
             m = re.match(r"timeout:\s*(\d+)(?:s)?\s*->\s*(\w+)", body_line)
             if m:
@@ -218,8 +227,14 @@ def _parse_state(lines: list[str], start: int) -> tuple[StateDef | None, int, in
             ignored = [e.strip() for e in events_str.split(",") if e.strip()]
             state_def.ignored_events.extend(ignored)
 
+    # Parse parallel block if present
+    if has_parallel:
+        parallel_def = _parse_parallel_block(body_lines)
+        if parallel_def:
+            state_def.parallel = parallel_def
+
     # Parse nested states directly from body_lines
-    if nested_state_lines:
+    if nested_state_lines and not has_parallel:
         nested_states = _parse_nested_states(body_lines, name)
         if nested_states:
             state_def.contains = nested_states
@@ -324,9 +339,12 @@ def _parse_nested_state(body_lines: list[str], start: int) -> tuple[StateDef | N
 
     # Parse body properties
     inner_nested_lines: list[str] = []
+    has_parallel = False
     for body_line in body_content:
         if body_line.startswith("state "):
             inner_nested_lines.append(body_line)
+        elif body_line.startswith("parallel"):
+            has_parallel = True
         elif body_line.startswith("description:"):
             state_def.description = body_line.split(":", 1)[1].strip().strip('"')
         elif body_line.startswith("on_entry:"):
@@ -337,6 +355,10 @@ def _parse_nested_state(body_lines: list[str], start: int) -> tuple[StateDef | N
             m = re.match(r"on_exit:\s*->\s*(\w+)", body_line)
             if m:
                 state_def.on_exit = m.group(1)
+        elif body_line.startswith("on_done:"):
+            m = re.match(r"on_done:\s*->\s*(\w+)", body_line)
+            if m:
+                state_def.on_done = m.group(1)
         elif body_line.startswith("timeout:"):
             m = re.match(r"timeout:\s*(\d+)(?:s)?\s*->\s*(\w+)", body_line)
             if m:
@@ -346,8 +368,14 @@ def _parse_nested_state(body_lines: list[str], start: int) -> tuple[StateDef | N
             ignored = [e.strip() for e in events_str.split(",") if e.strip()]
             state_def.ignored_events.extend(ignored)
 
+    # Parse parallel block if present
+    if has_parallel:
+        parallel_def = _parse_parallel_block(body_content)
+        if parallel_def:
+            state_def.parallel = parallel_def
+
     # Recursively parse nested states
-    if inner_nested_lines:
+    if inner_nested_lines and not has_parallel:
         inner_nested = _parse_nested_states(body_content, name)
         if inner_nested:
             state_def.contains = inner_nested
@@ -356,6 +384,84 @@ def _parse_nested_state(body_lines: list[str], start: int) -> tuple[StateDef | N
     lines_consumed = body_end - start
 
     return state_def, lines_consumed
+
+
+def _parse_parallel_block(body_lines: list[str]) -> ParallelDef | None:
+    """
+    Parse a parallel block from body lines.
+
+    Expects lines like:
+        parallel [sync: all_final] {
+            region region_name {
+                state child1 [initial]
+                state child2 [final]
+            }
+            region region_name2 { ... }
+        }
+    """
+    # Find the parallel line
+    parallel_start = -1
+    for i, line in enumerate(body_lines):
+        if line.strip().startswith("parallel"):
+            parallel_start = i
+            break
+
+    if parallel_start < 0:
+        return None
+
+    parallel_line = body_lines[parallel_start].strip()
+
+    # Parse optional sync strategy
+    sync: str | None = None
+    sync_match = re.search(r'\[sync:\s*(\w+)\]', parallel_line)
+    if sync_match:
+        raw_sync = sync_match.group(1)
+        # Convert underscore form to hyphen form
+        sync = raw_sync.replace("_", "-")
+
+    # Collect all lines inside the parallel block
+    brace_count = parallel_line.count("{") - parallel_line.count("}")
+    inner_lines: list[str] = []
+    pos = parallel_start + 1
+
+    while pos < len(body_lines) and brace_count > 0:
+        line = body_lines[pos].strip()
+        brace_count += line.count("{") - line.count("}")
+        if brace_count > 0 and line:
+            inner_lines.append(line)
+        pos += 1
+
+    # Parse regions from inner_lines
+    regions: list[RegionDef] = []
+    i = 0
+    while i < len(inner_lines):
+        line = inner_lines[i].strip()
+        if line.startswith("region "):
+            region_match = re.match(r"region\s+(\w+)", line)
+            if region_match:
+                region_name = region_match.group(1)
+                # Collect region body
+                region_brace = line.count("{") - line.count("}")
+                region_body: list[str] = []
+                j = i + 1
+                while j < len(inner_lines) and region_brace > 0:
+                    rline = inner_lines[j].strip()
+                    region_brace += rline.count("{") - rline.count("}")
+                    if region_brace > 0 and rline:
+                        region_body.append(rline)
+                    j += 1
+
+                # Parse states within the region
+                region_states = _parse_nested_states(region_body, region_name)
+                regions.append(RegionDef(name=region_name, states=region_states))
+                i = j
+                continue
+        i += 1
+
+    if not regions:
+        return None
+
+    return ParallelDef(regions=regions, sync=sync)
 
 
 def _parse_context(content: str) -> dict[str, Any]:

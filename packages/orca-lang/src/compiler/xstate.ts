@@ -20,6 +20,14 @@ function findStateRecursively(state: StateDef, actionName: string): StateDef | u
       if (found) return found;
     }
   }
+  if (state.parallel) {
+    for (const region of state.parallel.regions) {
+      for (const child of region.states) {
+        const found = findStateRecursively(child, actionName);
+        if (found) return found;
+      }
+    }
+  }
   return undefined;
 }
 
@@ -125,6 +133,38 @@ function buildStateConfig(state: StateDef, machine: MachineDef, allStates: State
     return config;
   }
 
+  // Check if this is a parallel state (has parallel regions)
+  if (state.parallel) {
+    config.type = 'parallel';
+    config.states = {};
+
+    for (const region of state.parallel.regions) {
+      const regionConfig: any = {};
+      const initialChild = region.states.find(s => s.isInitial) || region.states[0];
+      regionConfig.initial = initialChild.name;
+      regionConfig.states = {};
+
+      for (const child of region.states) {
+        regionConfig.states[child.name] = buildStateConfig(child, machine, region.states);
+      }
+
+      config.states[region.name] = regionConfig;
+    }
+
+    // onDone for synchronization (all-final is the XState default)
+    if (state.onDone) {
+      config.onDone = { target: state.onDone };
+    }
+
+    // Parent-level transitions (event bubbling to all regions)
+    const thisStateTransitions = machine.transitions.filter(t => t.source === state.name);
+    if (thisStateTransitions.length > 0) {
+      config.on = buildTransitions(thisStateTransitions, machine);
+    }
+
+    return config;
+  }
+
   // Leaf state configuration
   // Note: initial state is designated by the parent's `initial` property, not by type
   if (state.isFinal) {
@@ -179,13 +219,19 @@ function getParentTransitions(state: StateDef, machine: MachineDef, allStates: S
   return [...parentTransitions, ...grandparentTransitions];
 }
 
-// Find a state by name in a flat list of states (including nested)
+// Find a state by name in a flat list of states (including nested and parallel regions)
 function findStateByName(states: StateDef[], name: string): StateDef | undefined {
   for (const state of states) {
     if (state.name === name) return state;
     if (state.contains) {
       const found = findStateByName(state.contains, name);
       if (found) return found;
+    }
+    if (state.parallel) {
+      for (const region of state.parallel.regions) {
+        const found = findStateByName(region.states, name);
+        if (found) return found;
+      }
     }
   }
   return undefined;
@@ -351,6 +397,44 @@ export function compileToXState(machine: MachineDef): string {
         lines.push(`        }${j < state.contains.length - 1 ? ',' : ''}`);
       }
       lines.push(`      },`);
+      lines.push(`    }${i < machine.states.length - 1 ? ',' : ''}`);
+      continue;
+    }
+
+    // Check if this is a parallel state
+    if (state.parallel) {
+      lines.push(`      type: 'parallel',`);
+      lines.push(`      states: {`);
+      for (let r = 0; r < state.parallel.regions.length; r++) {
+        const region = state.parallel.regions[r];
+        const initialChild = region.states.find(s => s.isInitial) || region.states[0];
+        lines.push(`        ${region.name}: {`);
+        lines.push(`          initial: '${initialChild.name}',`);
+        lines.push(`          states: {`);
+        for (let j = 0; j < region.states.length; j++) {
+          const child = region.states[j];
+          lines.push(`            ${child.name}: {`);
+          if (child.description) {
+            lines.push(`              description: '${escapeString(child.description)}',`);
+          }
+          if (child.isFinal) {
+            lines.push(`              type: 'final',`);
+          }
+          if (child.onEntry) {
+            lines.push(`              entry: '${child.onEntry}',`);
+          }
+          if (child.onExit) {
+            lines.push(`              exit: '${child.onExit}',`);
+          }
+          lines.push(`            }${j < region.states.length - 1 ? ',' : ''}`);
+        }
+        lines.push(`          },`);
+        lines.push(`        }${r < state.parallel.regions.length - 1 ? ',' : ''}`);
+      }
+      lines.push(`      },`);
+      if (state.onDone) {
+        lines.push(`      onDone: { target: '${state.onDone}' },`);
+      }
       lines.push(`    }${i < machine.states.length - 1 ? ',' : ''}`);
       continue;
     }
