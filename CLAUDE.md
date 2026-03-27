@@ -104,7 +104,7 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 
 **Phase 4 Complete**: Machine invocation — state machines calling other state machines. `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, cross-machine verifier (cycle detection, child reachability, machine resolution), XState invoke config (`__machine__:Name`), runtime-ts and runtime-python child lifecycle (start on entry, stop on exit, completion events, snapshot/restore). 128 orca-lang tests, 63 runtime-ts tests, 68 runtime-python tests.
 
-**Next major milestone — Phase 4.5: Go Runtime + Ride-Hailing Demo** — `runtime-go` package to feature parity with TS/Python runtimes (including machine invocation), then a 5-machine ride-hailing trip coordinator demo built in Go. Design doc: `docs/demo-ride-hailing.md`.
+**Phase 4.5 In Progress**: Go runtime — `runtime-go` package with core runtime (machine, guards, actions, event bus, timeouts, snapshot/restore, invoke parsing), 16 tests passing; `demo-go` with 5-machine `trip.orca.md` definition. Design doc: `docs/demo-ride-hailing.md`.
 
 ## Known Limitations (v1 parallel regions)
 - `any-final` sync strategy has no native XState equivalent — works in standalone runtimes only

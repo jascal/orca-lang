@@ -117,7 +117,7 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 3 | ✅ Complete | Hierarchical states, parallel regions, property specification & guard-aware bounded model checking, snapshot/restore |
 | Phase 3.5 | ✅ Complete | Markdown syntax migration — `.orca.md` format with tables, headers, and lists for LLM-native generation |
 | Phase 4 | ✅ Complete | Machine invocation — `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, cross-machine verifier (cycle detection, child reachability, machine resolution), XState invoke config (`__machine__:Name`), runtime-ts child lifecycle (start on entry, stop on exit, completion events, snapshot/restore), runtime-python port, CLI verify/compile working |
-| Phase 4.5 | ⏳ Not started | Go runtime + ride-hailing demo — `runtime-go` to feature parity including invocation, then 5-machine trip coordinator demo in Go ([demo design](../../docs/demo-ride-hailing.md)) |
+| Phase 4.5 | 🔄 In progress | Go runtime — `runtime-go` package with core runtime (basic machine, guards, actions, event bus, timeouts, snapshot/restore, invoke parsing), 16 tests passing; demo-go with 5-machine trip.orca.md ([demo design](../../docs/demo-ride-hailing.md)) |
 | Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-file imports) |
 | Phase 6 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
 
