@@ -1,6 +1,8 @@
 """Order Processing Workflow - Demonstrates Orca state machine with event bus."""
 
 import asyncio
+import re
+from pathlib import Path
 from typing import Dict, Any
 
 from bus import DomainEvent, EventType, get_event_bus
@@ -9,46 +11,21 @@ from orca import parse_orca, OrcaMachine
 from orca.types import Context, Event as OrcaEvent
 
 
-# Orca machine definition for order processing
-ORDER_PROCESSOR_ORCA = """
-machine OrderProcessor
+def _load_orca_from_markdown(machine_name: str) -> str:
+    """Extract an Orca machine definition from workflows.orca.md."""
+    workflows_file = Path(__file__).parent.parent / "workflows.orca.md"
+    content = workflows_file.read_text()
 
-context {
-    order_id: ""
-    customer_id: ""
-    total: 0
-    status: "pending"
-    items: []
-}
+    # Find the section for this machine
+    pattern = rf"## {machine_name}\n(.*?)```orca\n(.*?)\n```"
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        return match.group(2)
+    raise ValueError(f"Machine '{machine_name}' not found in workflows.orca.md")
 
-state pending [initial] "Order received, awaiting validation"
-  on ORDER_PLACED -> validating
 
-state validating "Validating order details"
-  on VALIDATED -> payment_pending
-  on REJECTED -> rejected
-
-state payment_pending "Awaiting payment"
-  on PAYMENT_INITIATED -> processing
-  on PAYMENT_FAILED -> payment_failed
-
-state processing "Processing order"
-  on PROCESSED -> fulfilled
-
-state fulfilled "Order ready for shipping"
-  on SHIPPED -> shipped
-
-state shipped "Order shipped"
-  on DELIVERED -> delivered
-
-state delivered [final] "Order completed"
-
-state rejected [final] "Order rejected"
-
-state payment_failed "Payment failed, awaiting retry"
-  on RETRY_PAYMENT -> payment_pending
-  on CANCEL -> rejected
-"""
+# Load Orca machine definition from markdown
+ORDER_PROCESSOR_ORCA = _load_orca_from_markdown("OrderProcessor")
 
 
 def create_order_processor() -> OrcaMachine:

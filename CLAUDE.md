@@ -29,8 +29,12 @@ pnpm install
 
 # Python packages (from repo root)
 python3 -m venv .venv
-.venv/bin/pip install -e packages/runtime-python
-.venv/bin/pip install -e packages/demo-python
+.venv/bin/pip install -e ./packages/runtime-python
+.venv/bin/pip install -e ./packages/demo-python
+
+# Go packages (from repo root)
+pnpm run setup:go
+pnpm run build:demo-go
 ```
 
 ## Commands
@@ -49,7 +53,10 @@ pnpm test:lang
 pnpm test:demo-ts
 
 # Run Python demo
-.venv/bin/python packages/demo-python/demo.py
+pnpm run test:demo-python
+
+# Run Go demo
+pnpm run test:demo-go
 
 # Interactive text adventure
 cd packages/demo-ts && pnpm run cli

@@ -66,6 +66,11 @@ func ParseOrcaMd(source string) (*MachineDef, error) {
 	return parseMachineFromElements(elements)
 }
 
+// ParseOrcaMdAll parses all machines from an Orca markdown source.
+func ParseOrcaMdAll(source string) ([]*MachineDef, error) {
+	return parseOrcaMdMulti(source)
+}
+
 // parseOrcaMdMulti parses multiple machines from a multi-machine file.
 func parseOrcaMdMulti(source string) ([]*MachineDef, error) {
 	elements := parseMarkdownStructure(source)
@@ -793,7 +798,13 @@ func buildParallelRegions(entries []*mdStateEntry, startIdx int, regionLevel int
 	i := startIdx
 
 	for i < len(entries) && entries[i].level >= regionLevel {
-		if entries[i].entryType != "region" || entries[i].level != regionLevel {
+		// Skip entries deeper than regionLevel (states belonging to previous region)
+		if entries[i].level > regionLevel {
+			i++
+			continue
+		}
+		// Break if not a region (parent content or sibling region at same level)
+		if entries[i].entryType != "region" {
 			break
 		}
 

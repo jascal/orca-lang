@@ -7,10 +7,25 @@ Demonstrates combining:
 """
 
 import asyncio
+import re
+from pathlib import Path
 from bus import get_event_bus, EventType, DomainEvent
 from workflows.order import create_order_processor, process_order
 from workflows.agent import create_agent_supervisor, run_agent_demo
 from orca import OrcaMachine, parse_orca, Event as OrcaEvent
+
+
+def _load_orca_from_markdown(machine_name: str) -> str:
+    """Extract an Orca machine definition from workflows.orca.md."""
+    workflows_file = Path(__file__).parent / "workflows.orca.md"
+    content = workflows_file.read_text()
+
+    # Find the section for this machine
+    pattern = rf"## {machine_name}\n(.*?)```orca\n(.*?)\n```"
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        return match.group(2)
+    raise ValueError(f"Machine '{machine_name}' not found in workflows.orca.md")
 
 
 async def demo_order_processor():
@@ -108,24 +123,9 @@ async def demo_custom_machine():
     print("DEMO 4: PARSED ORCA MACHINE DEFINITION")
     print("=" * 60 + "\n")
 
-    orca_source = """
-machine PaymentProcessor
+    orca_source = _load_orca_from_markdown("PaymentProcessor")
 
-context { amount: 0 }
-
-state pending [initial] "Payment pending"
-  on PROCESS -> processing
-
-state processing "Processing payment"
-  on SUCCESS -> completed
-  on FAILURE -> failed
-
-state completed [final] "Payment successful"
-
-state failed [final] "Payment failed"
-"""
-
-    print(f"> Parsing Orca source...")
+    print(f"> Parsing Orca source from workflows.orca.md...")
     definition = parse_orca(orca_source)
     print(f"  Machine: {definition.name}")
     print(f"  States: {[s.name for s in definition.states]}")

@@ -1,6 +1,8 @@
 """Agent Task Supervisor - Demonstrates multi-agent orchestration with event bus."""
 
 import asyncio
+import re
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from bus import DomainEvent, EventType, get_event_bus
@@ -9,32 +11,21 @@ from orca import parse_orca, OrcaMachine
 from orca.types import Context, Event as OrcaEvent
 
 
-# Orca machine for agent task management
-AGENT_SUPERVISOR_ORCA = """
-machine AgentSupervisor
+def _load_orca_from_markdown(machine_name: str) -> str:
+    """Extract an Orca machine definition from workflows.orca.md."""
+    workflows_file = Path(__file__).parent.parent / "workflows.orca.md"
+    content = workflows_file.read_text()
 
-context {
-    task_id: ""
-    agent_id: ""
-    status: "idle"
-    result: ""
-    subtasks: []
-    completed_subtasks: []
-}
+    # Find the section for this machine
+    pattern = rf"## {machine_name}\n(.*?)```orca\n(.*?)\n```"
+    match = re.search(pattern, content, re.DOTALL)
+    if match:
+        return match.group(2)
+    raise ValueError(f"Machine '{machine_name}' not found in workflows.orca.md")
 
-state idle [initial] "Agent ready for tasks"
-  on TASK_ASSIGNED -> working
 
-state working "Agent processing task"
-  on SUBTASK_CREATED -> working
-  on SUBTASK_COMPLETED -> working
-  on ALL_SUBTASKS_COMPLETE -> success
-  on TASK_FAILED -> failed
-
-state success [final] "Task completed successfully"
-
-state failed [final] "Task failed"
-"""
+# Load Orca machine definition from markdown
+AGENT_SUPERVISOR_ORCA = _load_orca_from_markdown("AgentSupervisor")
 
 
 def create_agent_supervisor() -> OrcaMachine:

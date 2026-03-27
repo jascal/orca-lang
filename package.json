@@ -9,7 +9,10 @@
     "test:lang": "pnpm --filter orca run test",
     "test:demo-ts": "pnpm --filter orca-demo-ts run test",
     "test:demo-python": ".venv/bin/python packages/demo-python/demo.py",
-    "setup:python": "python3 -m venv .venv && .venv/bin/pip install -e packages/runtime-python && .venv/bin/pip install -e packages/demo-python",
+    "setup:python": "python3 -m venv .venv && .venv/bin/pip install -e ./packages/runtime-python && .venv/bin/pip install -e ./packages/demo-python",
+    "setup:go": "cd packages/runtime-go && go mod download && cd ../demo-go && go mod download",
+    "build:demo-go": "cd packages/demo-go && go build -o trip ./cmd/trip",
+    "test:demo-go": "cd packages/demo-go && ./trip",
     "clean": "pnpm -r exec rm -rf dist"
   },
   "engines": {
