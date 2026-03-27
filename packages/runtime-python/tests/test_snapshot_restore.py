@@ -1,41 +1,45 @@
 """Tests for snapshot() and restore() functionality."""
 
 import asyncio
-from orca_runtime_python.parser import parse_orca
+from orca_runtime_python.parser import parse_orca_md
 from orca_runtime_python.machine import OrcaMachine
 from orca_runtime_python.bus import EventBus
 
 
-SIMPLE_MACHINE = """machine test
+SIMPLE_MACHINE_MD = """# machine test
 
-context {
-  count: number = 0
-}
+## context
 
-events {
-  GO
-  NEXT
-}
+| Field | Type | Default |
+|-------|------|---------|
+| count | number | 0 |
 
-state idle [initial] {
-}
+## events
 
-state processing {
-}
+- GO
+- NEXT
 
-state done [final] {
-}
+## state idle [initial]
+> Idle state
 
-transitions {
-  idle + GO -> processing
-  processing + NEXT -> done
-}
+## state processing
+> Processing state
+
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | processing |
+| processing | NEXT | done |
 """
 
 
 async def _test_snapshot_captures_state():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus)
     await machine.start()
 
@@ -47,7 +51,7 @@ async def _test_snapshot_captures_state():
 
 async def _test_snapshot_after_transition():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus)
     await machine.start()
 
@@ -58,7 +62,7 @@ async def _test_snapshot_after_transition():
 
 async def _test_snapshot_captures_context():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus, context={"count": 42})
     await machine.start()
 
@@ -68,7 +72,7 @@ async def _test_snapshot_captures_context():
 
 async def _test_snapshot_is_deep_copy():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     ctx = {"count": 5}
     machine = OrcaMachine(definition, event_bus=bus, context=ctx)
     await machine.start()
@@ -81,7 +85,7 @@ async def _test_snapshot_is_deep_copy():
 
 async def _test_restore_state():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus)
     await machine.start()
 
@@ -103,7 +107,7 @@ async def _test_restore_state():
 
 async def _test_restore_context():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus, context={"count": 10})
     await machine.start()
 
@@ -115,7 +119,7 @@ async def _test_restore_context():
 
 async def _test_restore_is_deep_copy():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus)
     await machine.start()
 
@@ -130,7 +134,7 @@ async def _test_restore_is_deep_copy():
 
 async def _test_restore_preserves_active_state():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus)
     await machine.start()
 
@@ -145,7 +149,7 @@ async def _test_restore_preserves_active_state():
 
 async def _test_round_trip():
     bus = EventBus()
-    definition = parse_orca(SIMPLE_MACHINE)
+    definition = parse_orca_md(SIMPLE_MACHINE_MD)
     machine = OrcaMachine(definition, event_bus=bus, context={"count": 42})
     await machine.start()
 

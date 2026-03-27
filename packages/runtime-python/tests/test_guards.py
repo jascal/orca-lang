@@ -1,7 +1,7 @@
 """Tests for guard expression parsing and evaluation."""
 
 import asyncio
-from orca_runtime_python.parser import parse_orca
+from orca_runtime_python.parser import parse_orca_md
 from orca_runtime_python.machine import OrcaMachine
 from orca_runtime_python.bus import EventBus
 from orca_runtime_python.types import (
@@ -15,48 +15,60 @@ from orca_runtime_python.types import (
 )
 
 
-def orca_src(guard_def: str, context_line: str = "") -> str:
-    """Helper to create a minimal Orca machine definition string."""
-    ctx = f"context {{\n  {context_line}\n}}\n" if context_line else ""
-    return f"""machine test
+def orca_md(guard_expr: str, context_line: str = "") -> str:
+    """Helper to create a minimal Orca machine definition string in markdown format."""
+    ctx_table = ""
+    if context_line:
+        ctx_table = f"""
+## context
 
-{ctx}
-events {{
-  GO
-}}
+| Field | Type | Default |
+|-------|------|---------|
+| {context_line} | number | 0 |
+"""
+    return f"""# machine test
+{ctx_table}
 
-state idle [initial] {{
-}}
+## events
 
-state done [final] {{
-}}
+- GO
 
-guards {{
-  g: {guard_def}
-}}
+## state idle [initial]
+> Idle state
 
-transitions {{
-  idle + GO [g] -> done
-}}
+## state done [final]
+> Done state
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| g | `{guard_expr}` |
+
+## transitions
+
+| Source | Event | Target | Guard |
+|--------|-------|--------|-------|
+| idle   | GO    | done   | g |
 """
 
 
 # ---- Parser tests ----
 
 def test_parse_true():
-    defn = parse_orca(orca_src("true"))
+    defn = parse_orca_md(orca_md("true"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardTrue), f"Expected GuardTrue, got {type(guard)}"
 
 
 def test_parse_false():
-    defn = parse_orca(orca_src("false"))
+    defn = parse_orca_md(orca_md("false"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardFalse), f"Expected GuardFalse, got {type(guard)}"
 
 
 def test_parse_compare():
-    defn = parse_orca(orca_src("ctx.retry_count < 3", "retry_count: number = 0"))
+    defn = parse_orca_md(orca_md("ctx.retry_count < 3", "retry_count"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardCompare), f"Expected GuardCompare, got {type(guard)}"
     assert guard.op == "lt", f"Expected op 'lt', got '{guard.op}'"
@@ -65,7 +77,7 @@ def test_parse_compare():
 
 
 def test_parse_nullcheck_ne():
-    defn = parse_orca(orca_src("ctx.token != null", "token: string"))
+    defn = parse_orca_md(orca_md("ctx.token != null", "token"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardNullcheck), f"Expected GuardNullcheck, got {type(guard)}"
     assert guard.is_null is False, f"Expected is_null=False"
@@ -73,14 +85,14 @@ def test_parse_nullcheck_ne():
 
 
 def test_parse_nullcheck_eq():
-    defn = parse_orca(orca_src("ctx.value == null"))
+    defn = parse_orca_md(orca_md("ctx.value == null"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardNullcheck), f"Expected GuardNullcheck, got {type(guard)}"
     assert guard.is_null is True, f"Expected is_null=True"
 
 
 def test_parse_and():
-    defn = parse_orca(orca_src("ctx.a > 1 and ctx.b < 10"))
+    defn = parse_orca_md(orca_md("ctx.a > 1 and ctx.b < 10", "a"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardAnd), f"Expected GuardAnd, got {type(guard)}"
     assert isinstance(guard.left, GuardCompare), f"Expected left GuardCompare"
@@ -88,26 +100,26 @@ def test_parse_and():
 
 
 def test_parse_or():
-    defn = parse_orca(orca_src("ctx.a == 1 or ctx.b == 2"))
+    defn = parse_orca_md(orca_md("ctx.a == 1 or ctx.b == 2", "a"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardOr), f"Expected GuardOr, got {type(guard)}"
 
 
 def test_parse_not():
-    defn = parse_orca(orca_src("not ctx.allowed"))
+    defn = parse_orca_md(orca_md("not ctx.allowed"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardNot), f"Expected GuardNot, got {type(guard)}"
 
 
 def test_parse_compare_ge():
-    defn = parse_orca(orca_src("ctx.score >= 100"))
+    defn = parse_orca_md(orca_md("ctx.score >= 100", "score"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardCompare), f"Expected GuardCompare, got {type(guard)}"
     assert guard.op == "ge", f"Expected op 'ge', got '{guard.op}'"
 
 
 def test_parse_string_compare():
-    defn = parse_orca(orca_src('ctx.status == "pending"'))
+    defn = parse_orca_md(orca_md('ctx.status == "pending"', "status"))
     guard = defn.guards["g"]
     assert isinstance(guard, GuardCompare), f"Expected GuardCompare, got {type(guard)}"
     assert guard.op == "eq", f"Expected op 'eq', got '{guard.op}'"
@@ -117,7 +129,7 @@ def test_parse_string_compare():
 # ---- Evaluator tests ----
 
 async def _test_eval_compare_pass():
-    defn = parse_orca(orca_src("ctx.retry_count < 3", "retry_count: number = 0"))
+    defn = parse_orca_md(orca_md("ctx.retry_count < 3", "retry_count"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"retry_count": 1})
     await machine.start()
     result = await machine.send("GO")
@@ -126,7 +138,7 @@ async def _test_eval_compare_pass():
 
 
 async def _test_eval_compare_fail():
-    defn = parse_orca(orca_src("ctx.retry_count < 3", "retry_count: number = 0"))
+    defn = parse_orca_md(orca_md("ctx.retry_count < 3", "retry_count"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"retry_count": 5})
     await machine.start()
     result = await machine.send("GO")
@@ -135,7 +147,7 @@ async def _test_eval_compare_fail():
 
 
 async def _test_eval_nullcheck_pass():
-    defn = parse_orca(orca_src("ctx.token != null", "token: string"))
+    defn = parse_orca_md(orca_md("ctx.token != null", "token"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"token": "abc123"})
     await machine.start()
     result = await machine.send("GO")
@@ -143,7 +155,7 @@ async def _test_eval_nullcheck_pass():
 
 
 async def _test_eval_nullcheck_fail():
-    defn = parse_orca(orca_src("ctx.token != null", "token: string"))
+    defn = parse_orca_md(orca_md("ctx.token != null", "token"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"token": None})
     await machine.start()
     result = await machine.send("GO")
@@ -152,7 +164,7 @@ async def _test_eval_nullcheck_fail():
 
 
 async def _test_eval_and_both_true():
-    defn = parse_orca(orca_src("ctx.a > 1 and ctx.b < 10"))
+    defn = parse_orca_md(orca_md("ctx.a > 1 and ctx.b < 10", "a"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"a": 5, "b": 3})
     await machine.start()
     result = await machine.send("GO")
@@ -160,7 +172,7 @@ async def _test_eval_and_both_true():
 
 
 async def _test_eval_and_one_false():
-    defn = parse_orca(orca_src("ctx.a > 1 and ctx.b < 10"))
+    defn = parse_orca_md(orca_md("ctx.a > 1 and ctx.b < 10", "a"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"a": 0, "b": 3})
     await machine.start()
     result = await machine.send("GO")
@@ -168,7 +180,7 @@ async def _test_eval_and_one_false():
 
 
 async def _test_eval_or_one_true():
-    defn = parse_orca(orca_src("ctx.a == 1 or ctx.b == 2"))
+    defn = parse_orca_md(orca_md("ctx.a == 1 or ctx.b == 2", "a"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"a": 99, "b": 2})
     await machine.start()
     result = await machine.send("GO")
@@ -176,7 +188,7 @@ async def _test_eval_or_one_true():
 
 
 async def _test_eval_or_both_false():
-    defn = parse_orca(orca_src("ctx.a == 1 or ctx.b == 2"))
+    defn = parse_orca_md(orca_md("ctx.a == 1 or ctx.b == 2", "a"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"a": 99, "b": 99})
     await machine.start()
     result = await machine.send("GO")
@@ -184,7 +196,7 @@ async def _test_eval_or_both_false():
 
 
 async def _test_eval_not_null_is_true():
-    defn = parse_orca(orca_src("not ctx.blocked"))
+    defn = parse_orca_md(orca_md("not ctx.blocked"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"blocked": None})
     await machine.start()
     result = await machine.send("GO")
@@ -192,7 +204,7 @@ async def _test_eval_not_null_is_true():
 
 
 async def _test_eval_not_present_is_false():
-    defn = parse_orca(orca_src("not ctx.blocked"))
+    defn = parse_orca_md(orca_md("not ctx.blocked"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"blocked": "yes"})
     await machine.start()
     result = await machine.send("GO")
@@ -200,7 +212,7 @@ async def _test_eval_not_present_is_false():
 
 
 async def _test_eval_string_compare_pass():
-    defn = parse_orca(orca_src('ctx.status == "pending"'))
+    defn = parse_orca_md(orca_md('ctx.status == "pending"', "status"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"status": "pending"})
     await machine.start()
     result = await machine.send("GO")
@@ -208,7 +220,7 @@ async def _test_eval_string_compare_pass():
 
 
 async def _test_eval_string_compare_fail():
-    defn = parse_orca(orca_src('ctx.status == "pending"'))
+    defn = parse_orca_md(orca_md('ctx.status == "pending"', "status"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"status": "active"})
     await machine.start()
     result = await machine.send("GO")
@@ -216,7 +228,7 @@ async def _test_eval_string_compare_fail():
 
 
 async def _test_eval_compare_ge():
-    defn = parse_orca(orca_src("ctx.score >= 100"))
+    defn = parse_orca_md(orca_md("ctx.score >= 100", "score"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"score": 100})
     await machine.start()
     result = await machine.send("GO")
@@ -224,7 +236,7 @@ async def _test_eval_compare_ge():
 
 
 async def _test_eval_true_literal():
-    defn = parse_orca(orca_src("true"))
+    defn = parse_orca_md(orca_md("true"))
     machine = OrcaMachine(defn, event_bus=EventBus())
     await machine.start()
     result = await machine.send("GO")
@@ -232,7 +244,7 @@ async def _test_eval_true_literal():
 
 
 async def _test_eval_false_literal():
-    defn = parse_orca(orca_src("false"))
+    defn = parse_orca_md(orca_md("false"))
     machine = OrcaMachine(defn, event_bus=EventBus())
     await machine.start()
     result = await machine.send("GO")

@@ -2,7 +2,7 @@
  * Tests for ignored event enforcement.
  */
 
-import { parseOrca } from "../src/parser.js";
+import { parseOrcaMd } from "../src/parser.js";
 import { OrcaMachine } from "../src/machine.js";
 import { getEventBus, resetEventBus } from "../src/bus.js";
 
@@ -13,83 +13,89 @@ function assert(condition: boolean, message: string) {
 }
 
 // Machine where state idle ignores PING
-function ignoredEventMachineSrc(): string {
-  return `machine test
+function ignoredEventMachineMd(): string {
+  return `# machine test
 
-events {
-  GO
-  PING
-}
+## events
 
-state idle [initial] {
-  ignore: PING
-}
+- GO
+- PING
 
-state done [final] {
-}
+## state idle [initial]
+> Initial state
+- ignore: PING
 
-transitions {
-  idle + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | done   |
 `;
 }
 
 // Machine with multiple ignored events
-function multiIgnoreMachineSrc(): string {
-  return `machine test
+function multiIgnoreMachineMd(): string {
+  return `# machine test
 
-events {
-  GO
-  PING
-  HEARTBEAT
-}
+## events
 
-state idle [initial] {
-  ignore: PING, HEARTBEAT
-}
+- GO
+- PING
+- HEARTBEAT
 
-state done [final] {
-}
+## state idle [initial]
+> Initial state
+- ignore: PING, HEARTBEAT
 
-transitions {
-  idle + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | done   |
 `;
 }
 
 // Machine with ignored event that does not affect other states
-function ignoredInOnlyOneStateSrc(): string {
-  return `machine test
+function ignoredInOnlyOneStateMd(): string {
+  return `# machine test
 
-events {
-  GO
-  PING
-  RESET
-}
+## events
 
-state idle [initial] {
-  ignore: PING
-}
+- GO
+- PING
+- RESET
 
-state active {
-  ignore: RESET
-}
+## state idle [initial]
+> Initial state
+- ignore: PING
 
-state done [final] {
-}
+## state active
+> Active state
+- ignore: RESET
 
-transitions {
-  idle + GO -> active
-  active + PING -> done
-  active + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | active |
+| active | PING  | done   |
+| active | GO   | done   |
 `;
 }
 
 // ---- Parser tests ----
 
 function testParseIgnoredEvents() {
-  const def = parseOrca(ignoredEventMachineSrc());
+  const def = parseOrcaMd(ignoredEventMachineMd());
   const idleState = def.states.find(s => s.name === "idle");
   assert(idleState !== undefined, "idle state not found");
   assert(idleState!.ignoredEvents.length === 1, `Expected 1 ignored event, got ${idleState!.ignoredEvents.length}`);
@@ -97,7 +103,7 @@ function testParseIgnoredEvents() {
 }
 
 function testParseMultipleIgnoredEvents() {
-  const def = parseOrca(multiIgnoreMachineSrc());
+  const def = parseOrcaMd(multiIgnoreMachineMd());
   const idleState = def.states.find(s => s.name === "idle");
   assert(idleState !== undefined, "idle state not found");
   assert(idleState!.ignoredEvents.length === 2, `Expected 2 ignored events, got ${idleState!.ignoredEvents.length}`);
@@ -109,7 +115,7 @@ function testParseMultipleIgnoredEvents() {
 
 async function testIgnoredEventReturnsSilently() {
   resetEventBus();
-  const def = parseOrca(ignoredEventMachineSrc());
+  const def = parseOrcaMd(ignoredEventMachineMd());
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();
@@ -123,22 +129,24 @@ async function testIgnoredEventReturnsSilently() {
 
 async function testUnhandledEventReturnsError() {
   resetEventBus();
-  const def = parseOrca(`machine test
+  const def = parseOrcaMd(`# machine test
 
-events {
-  GO
-  UNKNOWN
-}
+## events
 
-state idle [initial] {
-}
+- GO
+- UNKNOWN
 
-state done [final] {
-}
+## state idle [initial]
+> Initial state
 
-transitions {
-  idle + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | done   |
 `);
   const machine = new OrcaMachine(def, getEventBus());
 
@@ -152,7 +160,7 @@ transitions {
 
 async function testHandledEventStillWorks() {
   resetEventBus();
-  const def = parseOrca(ignoredEventMachineSrc());
+  const def = parseOrcaMd(ignoredEventMachineMd());
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();
@@ -164,7 +172,7 @@ async function testHandledEventStillWorks() {
 
 async function testMultipleIgnoredEventsEnforced() {
   resetEventBus();
-  const def = parseOrca(multiIgnoreMachineSrc());
+  const def = parseOrcaMd(multiIgnoreMachineMd());
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();
@@ -182,7 +190,7 @@ async function testMultipleIgnoredEventsEnforced() {
 
 async function testIgnoredInOneStateNotAnother() {
   resetEventBus();
-  const def = parseOrca(ignoredInOnlyOneStateSrc());
+  const def = parseOrcaMd(ignoredInOnlyOneStateMd());
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();
@@ -210,28 +218,30 @@ async function testIgnoredInOneStateNotAnother() {
 
 async function testIgnoredEventOnlyInSpecificState() {
   resetEventBus();
-  const src = `machine test
+  const src = `# machine test
 
-events {
-  GO
-  PING
-  BACK
-}
+## events
 
-state idle [initial] {
-  ignore: PING
-}
+- GO
+- PING
+- BACK
 
-state active {
-}
+## state idle [initial]
+> Initial state
+- ignore: PING
 
-transitions {
-  idle + GO -> active
-  active + PING -> idle
-  active + BACK -> idle
-}
+## state active
+> Active state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | active |
+| active | PING  | idle   |
+| active | BACK  | idle   |
 `;
-  const def = parseOrca(src);
+  const def = parseOrcaMd(src);
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();

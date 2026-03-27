@@ -1,93 +1,100 @@
 """Tests for ignored event enforcement."""
 
 import asyncio
-from orca_runtime_python.parser import parse_orca
+from orca_runtime_python.parser import parse_orca_md
 from orca_runtime_python.machine import OrcaMachine
 from orca_runtime_python.bus import EventBus
 
 
-def ignored_event_machine_src() -> str:
-    return """machine test
+def ignored_event_machine_md() -> str:
+    return """# machine test
 
-events {
-  GO
-  PING
-}
+## events
 
-state idle [initial] {
-  ignore: PING
-}
+- GO
+- PING
 
-state done [final] {
-}
+## state idle [initial]
+> Idle state
+- ignore: PING
 
-transitions {
-  idle + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | done   |
 """
 
 
-def multi_ignore_machine_src() -> str:
-    return """machine test
+def multi_ignore_machine_md() -> str:
+    return """# machine test
 
-events {
-  GO
-  PING
-  HEARTBEAT
-}
+## events
 
-state idle [initial] {
-  ignore: PING, HEARTBEAT
-}
+- GO
+- PING
+- HEARTBEAT
 
-state done [final] {
-}
+## state idle [initial]
+> Idle state
+- ignore: PING
+- ignore: HEARTBEAT
 
-transitions {
-  idle + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | done   |
 """
 
 
-def ignored_in_only_one_state_src() -> str:
-    return """machine test
+def ignored_in_only_one_state_md() -> str:
+    return """# machine test
 
-events {
-  GO
-  PING
-  RESET
-}
+## events
 
-state idle [initial] {
-  ignore: PING
-}
+- GO
+- PING
+- RESET
 
-state active {
-  ignore: RESET
-}
+## state idle [initial]
+> Idle state
+- ignore: PING
 
-state done [final] {
-}
+## state active
+> Active state
+- ignore: RESET
 
-transitions {
-  idle + GO -> active
-  active + PING -> done
-  active + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | active |
+| active | PING  | done   |
+| active | GO    | done   |
 """
 
 
 # ---- Parser tests ----
 
 def test_parse_ignored_events():
-    defn = parse_orca(ignored_event_machine_src())
+    defn = parse_orca_md(ignored_event_machine_md())
     idle_state = next(s for s in defn.states if s.name == "idle")
     assert len(idle_state.ignored_events) == 1, f"Expected 1 ignored event, got {len(idle_state.ignored_events)}"
     assert idle_state.ignored_events[0] == "PING", f"Expected 'PING', got '{idle_state.ignored_events[0]}'"
 
 
 def test_parse_multiple_ignored_events():
-    defn = parse_orca(multi_ignore_machine_src())
+    defn = parse_orca_md(multi_ignore_machine_md())
     idle_state = next(s for s in defn.states if s.name == "idle")
     assert len(idle_state.ignored_events) == 2, f"Expected 2 ignored events, got {len(idle_state.ignored_events)}"
     assert "PING" in idle_state.ignored_events, "Expected PING in ignored events"
@@ -97,7 +104,7 @@ def test_parse_multiple_ignored_events():
 # ---- Runtime enforcement tests ----
 
 async def _test_ignored_event_returns_silently():
-    defn = parse_orca(ignored_event_machine_src())
+    defn = parse_orca_md(ignored_event_machine_md())
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()
@@ -110,24 +117,26 @@ async def _test_ignored_event_returns_silently():
 
 
 async def _test_unhandled_event_returns_error():
-    src = """machine test
+    src = """# machine test
 
-events {
-  GO
-  UNKNOWN
-}
+## events
 
-state idle [initial] {
-}
+- GO
+- UNKNOWN
 
-state done [final] {
-}
+## state idle [initial]
+> Idle state
 
-transitions {
-  idle + GO -> done
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | done   |
 """
-    defn = parse_orca(src)
+    defn = parse_orca_md(src)
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()
@@ -139,7 +148,7 @@ transitions {
 
 
 async def _test_handled_event_still_works():
-    defn = parse_orca(ignored_event_machine_src())
+    defn = parse_orca_md(ignored_event_machine_md())
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()
@@ -150,7 +159,7 @@ async def _test_handled_event_still_works():
 
 
 async def _test_multiple_ignored_events_enforced():
-    defn = parse_orca(multi_ignore_machine_src())
+    defn = parse_orca_md(multi_ignore_machine_md())
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()
@@ -167,7 +176,7 @@ async def _test_multiple_ignored_events_enforced():
 
 
 async def _test_ignored_in_one_state_not_another():
-    defn = parse_orca(ignored_in_only_one_state_src())
+    defn = parse_orca_md(ignored_in_only_one_state_md())
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()
@@ -194,28 +203,30 @@ async def _test_ignored_in_one_state_not_another():
 
 
 async def _test_ignored_event_only_in_specific_state():
-    src = """machine test
+    src = """# machine test
 
-events {
-  GO
-  PING
-  BACK
-}
+## events
 
-state idle [initial] {
-  ignore: PING
-}
+- GO
+- PING
+- BACK
 
-state active {
-}
+## state idle [initial]
+> Idle state
+- ignore: PING
 
-transitions {
-  idle + GO -> active
-  active + PING -> idle
-  active + BACK -> idle
-}
+## state active
+> Active state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | GO    | active |
+| active | PING  | idle   |
+| active | BACK  | idle   |
 """
-    defn = parse_orca(src)
+    defn = parse_orca_md(src)
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()

@@ -16,8 +16,6 @@ import {
   buildAuthorizationUrl as buildMiniMaxUrl,
   minimaxOAuthProvider,
 } from './auth/providers/minimax.js';
-import { tokenize } from './parser/lexer.js';
-import { parse } from './parser/parser.js';
 import { parseMarkdown } from './parser/markdown-parser.js';
 import { machineToMarkdown } from './parser/ast-to-markdown.js';
 import { checkStructural } from './verifier/structural.js';
@@ -31,8 +29,6 @@ import { createOrcaMachine } from './runtime/machine.js';
 import type { OrcaMachine, OrcaMachineOptions, OrcaState } from './runtime/types.js';
 
 // Re-export for use as a library
-export { tokenize } from './parser/lexer.js';
-export { parse } from './parser/parser.js';
 export { parseMarkdown } from './parser/markdown-parser.js';
 export { machineToMarkdown } from './parser/ast-to-markdown.js';
 export { compileToXState, compileToXStateMachine } from './compiler/xstate.js';
@@ -43,12 +39,9 @@ export type { OrcaMachine, OrcaMachineOptions, OrcaState, EffectHandlers, Effect
 
 import type { MachineDef } from './parser/ast.js';
 
-/** Parse a file as either .orca (DSL) or .orca.md (markdown) based on extension */
+/** Parse an Orca machine definition file (markdown format) */
 function parseFile(filePath: string, source: string): MachineDef {
-  if (filePath.endsWith('.orca.md') || (filePath.endsWith('.md') && !filePath.endsWith('.orca'))) {
-    return parseMarkdown(source).machine;
-  }
-  return parse(tokenize(source)).machine;
+  return parseMarkdown(source).machine;
 }
 
 async function login(provider: string, profileId: string = 'default'): Promise<void> {

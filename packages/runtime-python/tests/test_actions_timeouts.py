@@ -1,58 +1,62 @@
 """Tests for action handler execution and timeout enforcement."""
 
 import asyncio
-from orca_runtime_python.parser import parse_orca
+from orca_runtime_python.parser import parse_orca_md
 from orca_runtime_python.machine import OrcaMachine
 from orca_runtime_python.bus import EventBus
 
 
-def action_machine_src(action_name: str) -> str:
-    return f"""machine test
+def action_machine_md(action_name: str) -> str:
+    return f"""# machine test
 
-events {{
-  GO
-}}
+## events
 
-state idle [initial] {{
-}}
+- GO
 
-state done [final] {{
-}}
+## state idle [initial]
+> Idle state
 
-transitions {{
-  idle + GO -> done : {action_name}
-}}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target | Action |
+|--------|-------|--------|--------|
+| idle   | GO    | done   | {action_name} |
 """
 
 
-def timeout_machine_src(duration_sec: int) -> str:
-    return f"""machine test
+def timeout_machine_md(duration_sec: int) -> str:
+    return f"""# machine test
 
-events {{
-  GO
-  MANUAL
-}}
+## events
 
-state waiting [initial] {{
-  timeout: {duration_sec}s -> expired
-}}
+- GO
+- MANUAL
 
-state expired {{
-}}
+## state waiting [initial]
+> Waiting state
+- timeout: {duration_sec}s -> expired
 
-state manual {{
-}}
+## state expired
+> Expired state
 
-transitions {{
-  waiting + MANUAL -> manual
-}}
+## state manual
+> Manual state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| waiting | MANUAL | manual |
 """
 
 
 # ---- Action handler tests ----
 
 async def _test_action_handler_called():
-    defn = parse_orca(action_machine_src("increment"))
+    defn = parse_orca_md(action_machine_md("increment"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"count": 0})
 
     handler_called = False
@@ -70,7 +74,7 @@ async def _test_action_handler_called():
 
 
 async def _test_action_handler_receives_event_payload():
-    defn = parse_orca(action_machine_src("track"))
+    defn = parse_orca_md(action_machine_md("track"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"last_event": None})
 
     received_payload = None
@@ -89,7 +93,7 @@ async def _test_action_handler_receives_event_payload():
 
 
 async def _test_async_action_handler():
-    defn = parse_orca(action_machine_src("async_op"))
+    defn = parse_orca_md(action_machine_md("async_op"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"processed": False})
 
     async def async_op(ctx, evt=None):
@@ -103,7 +107,7 @@ async def _test_async_action_handler():
 
 
 async def _test_no_handler_still_transitions():
-    defn = parse_orca(action_machine_src("unregistered"))
+    defn = parse_orca_md(action_machine_md("unregistered"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"count": 0})
     # Don't register any handler
 
@@ -114,7 +118,7 @@ async def _test_no_handler_still_transitions():
 
 
 async def _test_unregister_action():
-    defn = parse_orca(action_machine_src("increment"))
+    defn = parse_orca_md(action_machine_md("increment"))
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"count": 0})
 
     called = False
@@ -133,28 +137,30 @@ async def _test_unregister_action():
 
 
 async def _test_multiple_action_handlers():
-    src = """machine test
+    src = """# machine test
 
-events {
-  STEP1
-  STEP2
-}
+## events
 
-state a [initial] {
-}
+- STEP1
+- STEP2
 
-state b {
-}
+## state a [initial]
+> State a
 
-state c [final] {
-}
+## state b
+> State b
 
-transitions {
-  a + STEP1 -> b : action1
-  b + STEP2 -> c : action2
-}
+## state c [final]
+> State c
+
+## transitions
+
+| Source | Event | Target | Action |
+|--------|-------|--------|--------|
+| a      | STEP1 | b      | action1 |
+| b      | STEP2 | c      | action2 |
 """
-    defn = parse_orca(src)
+    defn = parse_orca_md(src)
     machine = OrcaMachine(defn, event_bus=EventBus(), context={"log": []})
 
     def action1(ctx, evt=None):
@@ -175,7 +181,7 @@ transitions {
 # ---- Timeout tests ----
 
 async def _test_timeout_transitions():
-    defn = parse_orca(timeout_machine_src(1))  # 1 second timeout
+    defn = parse_orca_md(timeout_machine_md(1))  # 1 second timeout
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()
@@ -188,7 +194,7 @@ async def _test_timeout_transitions():
 
 
 async def _test_timeout_cancelled_on_manual_transition():
-    defn = parse_orca(timeout_machine_src(1))
+    defn = parse_orca_md(timeout_machine_md(1))
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()
@@ -205,7 +211,7 @@ async def _test_timeout_cancelled_on_manual_transition():
 
 
 async def _test_timeout_cancelled_on_stop():
-    defn = parse_orca(timeout_machine_src(1))
+    defn = parse_orca_md(timeout_machine_md(1))
     machine = OrcaMachine(defn, event_bus=EventBus())
 
     await machine.start()

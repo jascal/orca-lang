@@ -3,8 +3,6 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { parseMarkdown } from '../src/parser/markdown-parser.js';
 import { machineToMarkdown } from '../src/parser/ast-to-markdown.js';
-import { tokenize } from '../src/parser/lexer.js';
-import { parse } from '../src/parser/parser.js';
 
 describe('Markdown Parser', () => {
   describe('minimal machine', () => {

@@ -2,53 +2,66 @@
  * Tests for guard expression parsing and evaluation.
  */
 
-import { parseOrca } from "../src/parser.js";
+import { parseOrcaMd } from "../src/parser.js";
 import { OrcaMachine } from "../src/machine.js";
 import { getEventBus, resetEventBus } from "../src/bus.js";
 
-// Helper to create a minimal Orca machine definition string
-function orcaSrc(guardDef: string, contextLine = ""): string {
-  return `machine test
+// Helper to create a minimal Orca machine definition string in markdown format
+function orcaMd(guardExpr: string, contextField = ""): string {
+  const contextSection = contextField
+    ? `## context
 
-${contextLine ? `context {\n  ${contextLine}\n}\n` : ""}
-events {
-  GO
-}
+| Field | Type | Default |
+|-------|------|---------|
+| ${contextField} |
 
-state idle [initial] {
-}
+`
+    : "";
 
-state done [final] {
-}
+  return `# machine test
 
-guards {
-  g: ${guardDef}
-}
+${contextSection}## events
 
-transitions {
-  idle + GO [g] -> done
-}
+- GO
+
+## state idle [initial]
+> Initial state
+
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Guard | Target |
+|--------|-------|-------|--------|
+| idle   | GO    | g     | done   |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| g    | \`${guardExpr}\` |
 `;
 }
 
 // ---- Parser tests ----
 
 function testParseTrue() {
-  const def = parseOrca(orcaSrc("true"));
+  const def = parseOrcaMd(orcaMd("true"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "true", `Expected kind 'true', got '${guard.kind}'`);
 }
 
 function testParseFalse() {
-  const def = parseOrca(orcaSrc("false"));
+  const def = parseOrcaMd(orcaMd("false"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "false", `Expected kind 'false', got '${guard.kind}'`);
 }
 
 function testParseCompare() {
-  const def = parseOrca(orcaSrc("ctx.retry_count < 3", "retry_count: number = 0"));
+  const def = parseOrcaMd(orcaMd("ctx.retry_count < 3", "retry_count: number = 0"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "compare", `Expected kind 'compare', got '${guard.kind}'`);
@@ -60,7 +73,7 @@ function testParseCompare() {
 }
 
 function testParseNullcheck() {
-  const def = parseOrca(orcaSrc("ctx.token != null", "token: string"));
+  const def = parseOrcaMd(orcaMd("ctx.token != null", "token: string"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "nullcheck", `Expected kind 'nullcheck', got '${guard.kind}'`);
@@ -71,7 +84,7 @@ function testParseNullcheck() {
 }
 
 function testParseNullcheckEqual() {
-  const def = parseOrca(orcaSrc("ctx.value == null"));
+  const def = parseOrcaMd(orcaMd("ctx.value == null"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "nullcheck", `Expected kind 'nullcheck', got '${guard.kind}'`);
@@ -81,7 +94,7 @@ function testParseNullcheckEqual() {
 }
 
 function testParseAnd() {
-  const def = parseOrca(orcaSrc("ctx.a > 1 and ctx.b < 10"));
+  const def = parseOrcaMd(orcaMd("ctx.a > 1 and ctx.b < 10"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "and", `Expected kind 'and', got '${guard.kind}'`);
@@ -92,21 +105,21 @@ function testParseAnd() {
 }
 
 function testParseOr() {
-  const def = parseOrca(orcaSrc("ctx.a == 1 or ctx.b == 2"));
+  const def = parseOrcaMd(orcaMd("ctx.a == 1 or ctx.b == 2"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "or", `Expected kind 'or', got '${guard.kind}'`);
 }
 
 function testParseNot() {
-  const def = parseOrca(orcaSrc("not ctx.allowed"));
+  const def = parseOrcaMd(orcaMd("not ctx.allowed"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "not", `Expected kind 'not', got '${guard.kind}'`);
 }
 
 function testParseCompareGe() {
-  const def = parseOrca(orcaSrc("ctx.score >= 100"));
+  const def = parseOrcaMd(orcaMd("ctx.score >= 100"));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "compare", `Expected kind 'compare', got '${guard.kind}'`);
@@ -116,7 +129,7 @@ function testParseCompareGe() {
 }
 
 function testParseStringCompare() {
-  const def = parseOrca(orcaSrc('ctx.status == "pending"'));
+  const def = parseOrcaMd(orcaMd('ctx.status == "pending"'));
   const guard = def.guards["g"];
   assert(guard !== undefined, "Guard 'g' not found");
   assert(guard.kind === "compare", `Expected kind 'compare', got '${guard.kind}'`);
@@ -130,7 +143,7 @@ function testParseStringCompare() {
 
 async function testEvalComparePass() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.retry_count < 3", "retry_count: number = 0"));
+  const def = parseOrcaMd(orcaMd("ctx.retry_count < 3", "retry_count: number = 0"));
   const machine = new OrcaMachine(def, getEventBus(), { retry_count: 1 });
   await machine.start();
   const result = await machine.send("GO");
@@ -140,7 +153,7 @@ async function testEvalComparePass() {
 
 async function testEvalCompareFail() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.retry_count < 3", "retry_count: number = 0"));
+  const def = parseOrcaMd(orcaMd("ctx.retry_count < 3", "retry_count: number = 0"));
   const machine = new OrcaMachine(def, getEventBus(), { retry_count: 5 });
   await machine.start();
   const result = await machine.send("GO");
@@ -150,7 +163,7 @@ async function testEvalCompareFail() {
 
 async function testEvalNullcheckPass() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.token != null", "token: string"));
+  const def = parseOrcaMd(orcaMd("ctx.token != null", "token: string"));
   const machine = new OrcaMachine(def, getEventBus(), { token: "abc123" });
   await machine.start();
   const result = await machine.send("GO");
@@ -159,7 +172,7 @@ async function testEvalNullcheckPass() {
 
 async function testEvalNullcheckFail() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.token != null", "token: string"));
+  const def = parseOrcaMd(orcaMd("ctx.token != null", "token: string"));
   const machine = new OrcaMachine(def, getEventBus(), { token: null });
   await machine.start();
   const result = await machine.send("GO");
@@ -169,7 +182,7 @@ async function testEvalNullcheckFail() {
 
 async function testEvalAndBothTrue() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.a > 1 and ctx.b < 10"));
+  const def = parseOrcaMd(orcaMd("ctx.a > 1 and ctx.b < 10"));
   const machine = new OrcaMachine(def, getEventBus(), { a: 5, b: 3 });
   await machine.start();
   const result = await machine.send("GO");
@@ -178,7 +191,7 @@ async function testEvalAndBothTrue() {
 
 async function testEvalAndOneFalse() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.a > 1 and ctx.b < 10"));
+  const def = parseOrcaMd(orcaMd("ctx.a > 1 and ctx.b < 10"));
   const machine = new OrcaMachine(def, getEventBus(), { a: 0, b: 3 });
   await machine.start();
   const result = await machine.send("GO");
@@ -187,7 +200,7 @@ async function testEvalAndOneFalse() {
 
 async function testEvalOrOneTrue() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.a == 1 or ctx.b == 2"));
+  const def = parseOrcaMd(orcaMd("ctx.a == 1 or ctx.b == 2"));
   const machine = new OrcaMachine(def, getEventBus(), { a: 99, b: 2 });
   await machine.start();
   const result = await machine.send("GO");
@@ -196,7 +209,7 @@ async function testEvalOrOneTrue() {
 
 async function testEvalOrBothFalse() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.a == 1 or ctx.b == 2"));
+  const def = parseOrcaMd(orcaMd("ctx.a == 1 or ctx.b == 2"));
   const machine = new OrcaMachine(def, getEventBus(), { a: 99, b: 99 });
   await machine.start();
   const result = await machine.send("GO");
@@ -207,7 +220,7 @@ async function testEvalNotNullIsTrue() {
   resetEventBus();
   // "not ctx.blocked" => not(nullcheck(blocked, isNull=false))
   // When blocked is null: nullcheck returns false (value IS null), not(false) = true
-  const def = parseOrca(orcaSrc("not ctx.blocked"));
+  const def = parseOrcaMd(orcaMd("not ctx.blocked"));
   const machine = new OrcaMachine(def, getEventBus(), { blocked: null });
   await machine.start();
   const result = await machine.send("GO");
@@ -217,7 +230,7 @@ async function testEvalNotNullIsTrue() {
 async function testEvalNotPresentIsFalse() {
   resetEventBus();
   // When blocked is a non-null value: nullcheck(isNull=false) => true, not(true) = false
-  const def = parseOrca(orcaSrc("not ctx.blocked"));
+  const def = parseOrcaMd(orcaMd("not ctx.blocked"));
   const machine = new OrcaMachine(def, getEventBus(), { blocked: "yes" });
   await machine.start();
   const result = await machine.send("GO");
@@ -226,7 +239,7 @@ async function testEvalNotPresentIsFalse() {
 
 async function testEvalStringComparePass() {
   resetEventBus();
-  const def = parseOrca(orcaSrc('ctx.status == "pending"'));
+  const def = parseOrcaMd(orcaMd('ctx.status == "pending"'));
   const machine = new OrcaMachine(def, getEventBus(), { status: "pending" });
   await machine.start();
   const result = await machine.send("GO");
@@ -235,7 +248,7 @@ async function testEvalStringComparePass() {
 
 async function testEvalStringCompareFail() {
   resetEventBus();
-  const def = parseOrca(orcaSrc('ctx.status == "pending"'));
+  const def = parseOrcaMd(orcaMd('ctx.status == "pending"'));
   const machine = new OrcaMachine(def, getEventBus(), { status: "active" });
   await machine.start();
   const result = await machine.send("GO");
@@ -244,7 +257,7 @@ async function testEvalStringCompareFail() {
 
 async function testEvalCompareGe() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("ctx.score >= 100"));
+  const def = parseOrcaMd(orcaMd("ctx.score >= 100"));
   const machine = new OrcaMachine(def, getEventBus(), { score: 100 });
   await machine.start();
   const result = await machine.send("GO");
@@ -253,7 +266,7 @@ async function testEvalCompareGe() {
 
 async function testEvalTrueLiteral() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("true"));
+  const def = parseOrcaMd(orcaMd("true"));
   const machine = new OrcaMachine(def, getEventBus());
   await machine.start();
   const result = await machine.send("GO");
@@ -262,7 +275,7 @@ async function testEvalTrueLiteral() {
 
 async function testEvalFalseLiteral() {
   resetEventBus();
-  const def = parseOrca(orcaSrc("false"));
+  const def = parseOrcaMd(orcaMd("false"));
   const machine = new OrcaMachine(def, getEventBus());
   await machine.start();
   const result = await machine.send("GO");

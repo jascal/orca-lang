@@ -2,7 +2,7 @@
  * Tests for action handler execution and timeout enforcement.
  */
 
-import { parseOrca } from "../src/parser.js";
+import { parseOrcaMd } from "../src/parser.js";
 import { OrcaMachine } from "../src/machine.js";
 import { getEventBus, resetEventBus } from "../src/bus.js";
 
@@ -13,47 +13,91 @@ function assert(condition: boolean, message: string) {
 }
 
 // Helper: minimal machine with a transition action
-function actionMachineSrc(actionName: string): string {
-  return `machine test
+function actionMachineMd(actionName: string): string {
+  return `# machine test
 
-events {
-  GO
-}
+## events
 
-state idle [initial] {
-}
+- GO
 
-state done [final] {
-}
+## state idle [initial]
+> Initial state
 
-transitions {
-  idle + GO -> done : ${actionName}
-}
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event | Target | Action |
+|--------|-------|--------|--------|
+| idle   | GO    | done   | ${actionName} |
+
+## actions
+
+| Name | Signature |
+|------|-----------|
+| ${actionName} | \`(ctx) -> Context\` |
 `;
 }
 
 // Helper: machine with timeout on a state
-function timeoutMachineSrc(durationSec: number): string {
-  return `machine test
+function timeoutMachineMd(durationSec: number): string {
+  return `# machine test
 
-events {
-  GO
-  MANUAL
+## events
+
+- GO
+- MANUAL
+
+## state waiting [initial]
+> Waiting state
+- timeout: ${durationSec}s -> expired
+
+## state expired
+> Expired state
+
+## state manual
+> Manual state
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| waiting | MANUAL | manual |
+`;
 }
 
-state waiting [initial] {
-  timeout: ${durationSec}s -> expired
-}
+// Helper: multi-step machine with multiple actions
+function multiActionMachineMd(): string {
+  return `# machine test
 
-state expired {
-}
+## events
 
-state manual {
-}
+- STEP1
+- STEP2
 
-transitions {
-  waiting + MANUAL -> manual
-}
+## state a [initial]
+> State A
+
+## state b
+> State B
+
+## state c [final]
+> State C
+
+## transitions
+
+| Source | Event | Target | Action |
+|--------|-------|--------|--------|
+| a      | STEP1 | b      | action1 |
+| b      | STEP2 | c      | action2 |
+
+## actions
+
+| Name | Signature |
+|------|-----------|
+| action1 | \`(ctx) -> Context\` |
+| action2 | \`(ctx) -> Context\` |
 `;
 }
 
@@ -61,7 +105,7 @@ transitions {
 
 async function testActionHandlerCalled() {
   resetEventBus();
-  const def = parseOrca(actionMachineSrc("increment"));
+  const def = parseOrcaMd(actionMachineMd("increment"));
   const machine = new OrcaMachine(def, getEventBus(), { count: 0 });
 
   let handlerCalled = false;
@@ -78,7 +122,7 @@ async function testActionHandlerCalled() {
 
 async function testActionHandlerUpdatesContext() {
   resetEventBus();
-  const def = parseOrca(actionMachineSrc("increment"));
+  const def = parseOrcaMd(actionMachineMd("increment"));
   const machine = new OrcaMachine(def, getEventBus(), { count: 0 });
 
   machine.registerAction("increment", (ctx) => {
@@ -87,14 +131,12 @@ async function testActionHandlerUpdatesContext() {
 
   await machine.start();
   await machine.send("GO");
-  // Access context through another action or check directly via a guard
-  // We'll create a more direct test
   assert(true, "Context update verified through handler call");
 }
 
 async function testActionHandlerReceivesEventPayload() {
   resetEventBus();
-  const def = parseOrca(actionMachineSrc("track"));
+  const def = parseOrcaMd(actionMachineMd("track"));
   const machine = new OrcaMachine(def, getEventBus(), { last_event: null });
 
   let receivedPayload: Record<string, unknown> | undefined;
@@ -112,7 +154,7 @@ async function testActionHandlerReceivesEventPayload() {
 
 async function testAsyncActionHandler() {
   resetEventBus();
-  const def = parseOrca(actionMachineSrc("async_op"));
+  const def = parseOrcaMd(actionMachineMd("async_op"));
   const machine = new OrcaMachine(def, getEventBus(), { processed: false });
 
   machine.registerAction("async_op", async (ctx) => {
@@ -127,7 +169,7 @@ async function testAsyncActionHandler() {
 
 async function testNoHandlerStillTransitions() {
   resetEventBus();
-  const def = parseOrca(actionMachineSrc("unregistered"));
+  const def = parseOrcaMd(actionMachineMd("unregistered"));
   const machine = new OrcaMachine(def, getEventBus(), { count: 0 });
   // Don't register any handler
 
@@ -139,7 +181,7 @@ async function testNoHandlerStillTransitions() {
 
 async function testUnregisterAction() {
   resetEventBus();
-  const def = parseOrca(actionMachineSrc("increment"));
+  const def = parseOrcaMd(actionMachineMd("increment"));
   const machine = new OrcaMachine(def, getEventBus(), { count: 0 });
 
   let called = false;
@@ -156,28 +198,7 @@ async function testUnregisterAction() {
 
 async function testMultipleActionHandlers() {
   resetEventBus();
-  const src = `machine test
-
-events {
-  STEP1
-  STEP2
-}
-
-state a [initial] {
-}
-
-state b {
-}
-
-state c [final] {
-}
-
-transitions {
-  a + STEP1 -> b : action1
-  b + STEP2 -> c : action2
-}
-`;
-  const def = parseOrca(src);
+  const def = parseOrcaMd(multiActionMachineMd());
   const machine = new OrcaMachine(def, getEventBus(), { log: [] as string[] });
 
   machine.registerAction("action1", (ctx) => {
@@ -190,7 +211,6 @@ transitions {
   await machine.start();
   await machine.send("STEP1");
   await machine.send("STEP2");
-  // Both actions should have been called in sequence
   assert(true, "Multiple actions registered and called");
 }
 
@@ -198,7 +218,7 @@ transitions {
 
 async function testTimeoutTransitions() {
   resetEventBus();
-  const def = parseOrca(timeoutMachineSrc(1)); // 1 second timeout
+  const def = parseOrcaMd(timeoutMachineMd(1)); // 1 second timeout
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();
@@ -212,7 +232,7 @@ async function testTimeoutTransitions() {
 
 async function testTimeoutCancelledOnManualTransition() {
   resetEventBus();
-  const def = parseOrca(timeoutMachineSrc(1)); // 1 second timeout
+  const def = parseOrcaMd(timeoutMachineMd(1)); // 1 second timeout
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();
@@ -230,7 +250,7 @@ async function testTimeoutCancelledOnManualTransition() {
 
 async function testTimeoutCancelledOnStop() {
   resetEventBus();
-  const def = parseOrca(timeoutMachineSrc(1));
+  const def = parseOrcaMd(timeoutMachineMd(1));
   const machine = new OrcaMachine(def, getEventBus());
 
   await machine.start();

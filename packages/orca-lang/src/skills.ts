@@ -1,6 +1,4 @@
 import { readFileSync } from 'fs';
-import { tokenize } from './parser/lexer.js';
-import { parse } from './parser/parser.js';
 import { parseMarkdown } from './parser/markdown-parser.js';
 import { checkStructural } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
@@ -15,12 +13,9 @@ import type { LLMProvider } from './llm/index.js';
 import { getCodeGenerator } from './generators/index.js';
 import { CodeGeneratorType } from './config/types.js';
 
-/** Parse a file as either .orca (DSL) or .orca.md (markdown) based on extension */
+/** Parse an Orca machine definition file (markdown format) */
 function parseFile(filePath: string, source: string): { machine: MachineDef } {
-  if (filePath.endsWith('.orca.md') || (filePath.endsWith('.md') && !filePath.endsWith('.orca'))) {
-    return parseMarkdown(source);
-  }
-  return parse(tokenize(source));
+  return parseMarkdown(source);
 }
 
 export interface SkillError {

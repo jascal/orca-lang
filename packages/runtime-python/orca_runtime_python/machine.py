@@ -647,7 +647,10 @@ class OrcaMachine:
         if not state_def or not state_def.timeout:
             return
 
-        duration_s = int(state_def.timeout["duration"])
+        # Parse duration string like "1s" or "5" (strip non-numeric suffix)
+        import re
+        duration_match = re.match(r"(\d+)", state_def.timeout["duration"])
+        duration_s = int(duration_match.group(1)) if duration_match else 0
         target = state_def.timeout["target"]
 
         async def _timeout_handler():

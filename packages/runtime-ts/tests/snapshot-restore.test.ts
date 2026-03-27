@@ -2,34 +2,38 @@
  * Tests for snapshot() and restore() functionality.
  */
 
-import { parseOrca } from "../src/parser.js";
+import { parseOrcaMd } from "../src/parser.js";
 import { OrcaMachine } from "../src/machine.js";
 import { getEventBus, resetEventBus } from "../src/bus.js";
 
-const simpleMachine = `machine test
+const simpleMachineMd = `# machine test
 
-context {
-  count: number = 0
-}
+## context
 
-events {
-  GO
-  NEXT
-}
+| Field | Type   | Default |
+|-------|--------|---------|
+| count | number | 0       |
 
-state idle [initial] {
-}
+## events
 
-state processing {
-}
+- GO
+- NEXT
 
-state done [final] {
-}
+## state idle [initial]
+> Idle state
 
-transitions {
-  idle + GO -> processing
-  processing + NEXT -> done
-}
+## state processing
+> Processing state
+
+## state done [final]
+> Done state
+
+## transitions
+
+| Source      | Event | Target     |
+|-------------|-------|------------|
+| idle        | GO    | processing |
+| processing  | NEXT  | done       |
 `;
 
 function assert(condition: boolean, message: string) {
@@ -40,7 +44,7 @@ function assert(condition: boolean, message: string) {
 
 async function testSnapshotCapturesState() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus());
   await machine.start();
 
@@ -52,7 +56,7 @@ async function testSnapshotCapturesState() {
 
 async function testSnapshotAfterTransition() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus());
   await machine.start();
 
@@ -63,7 +67,7 @@ async function testSnapshotAfterTransition() {
 
 async function testSnapshotCapturesContext() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus(), { count: 42 });
   await machine.start();
 
@@ -73,7 +77,7 @@ async function testSnapshotCapturesContext() {
 
 async function testSnapshotIsDeepCopy() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const ctx = { count: 5 };
   const machine = new OrcaMachine(def, getEventBus(), ctx);
   await machine.start();
@@ -86,7 +90,7 @@ async function testSnapshotIsDeepCopy() {
 
 async function testRestoreState() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus());
   await machine.start();
 
@@ -108,7 +112,7 @@ async function testRestoreState() {
 
 async function testRestoreContext() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus(), { count: 10 });
   await machine.start();
 
@@ -126,7 +130,7 @@ async function testRestoreContext() {
 
 async function testRestoreIsDeepCopy() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus());
   await machine.start();
 
@@ -141,7 +145,7 @@ async function testRestoreIsDeepCopy() {
 
 async function testRestorePreservesActiveState() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus());
   await machine.start();
 
@@ -156,7 +160,7 @@ async function testRestorePreservesActiveState() {
 
 async function testRoundTrip() {
   resetEventBus();
-  const def = parseOrca(simpleMachine);
+  const def = parseOrcaMd(simpleMachineMd);
   const machine = new OrcaMachine(def, getEventBus(), { count: 42 });
   await machine.start();
 

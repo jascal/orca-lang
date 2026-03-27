@@ -1,69 +1,68 @@
 import { describe, it, expect } from 'vitest';
-import { tokenize } from '../src/parser/lexer.js';
-import { parse } from '../src/parser/parser.js';
+import { parseMarkdown } from '../src/parser/markdown-parser.js';
 import { checkProperties } from '../src/verifier/properties.js';
 import { MachineDef, Property } from '../src/parser/ast.js';
 
-// Helper to parse an orca source and return the machine
+// Helper to parse a markdown source and return the machine
 function parseMachine(source: string): MachineDef {
-  const tokens = tokenize(source);
-  const result = parse(tokens);
-  return result.machine;
+  return parseMarkdown(source).machine;
 }
 
 // Minimal valid machine for property testing
-const baseMachine = `
-machine TestMachine
+const baseMachine = `# machine TestMachine
 
-context {
-  count: int = 0
-  status: string
-}
+## context
 
-events {
-  go
-  advance
-  fail
-  retry
-  complete
-}
+| Field  | Type   | Default |
+|--------|--------|---------|
+| count  | int    | 0       |
+| status | string |         |
 
-state idle [initial] {
-  description: "Start state"
-}
+## events
 
-state processing {
-  description: "Processing"
-}
+- go
+- advance
+- fail
+- retry
+- complete
 
-state validated {
-  description: "Validated"
-}
+## state idle [initial]
+> Start state
 
-state completed [final] {
-  description: "Done"
-}
+## state processing
+> Processing
 
-state failed [final] {
-  description: "Failed"
-}
+## state validated
+> Validated
 
-transitions {
-  idle       + go       -> processing  : _
-  processing + advance  -> validated   : _
-  processing + fail     -> failed      : _
-  validated  + complete -> completed   : _
-  validated  + fail     -> failed      : _
-}
+## state completed [final]
+> Done
 
-actions {}
+## state failed [final]
+> Failed
+
+## transitions
+
+| Source     | Event   | Target    |
+|------------|---------|-----------|
+| idle       | go      | processing |
+| processing | advance | validated  |
+| processing | fail    | failed     |
+| validated  | complete| completed  |
+| validated  | fail    | failed     |
+
+## actions
+
+| Name | Signature |
+|------|----------|
+|      |          |
 `;
 
 // ---- Parser Tests ----
 
 describe('Property Parser', () => {
   it('parses reachable property', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  reachable: completed from idle\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: completed from idle`);
     const machine = parseMachine(source);
     expect(machine.properties).toBeDefined();
     expect(machine.properties!.length).toBe(1);
@@ -71,13 +70,13 @@ describe('Property Parser', () => {
   });
 
   it('parses unreachable property', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  unreachable: completed from failed\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- unreachable: completed from failed`);
     const machine = parseMachine(source);
     expect(machine.properties![0]).toEqual({ kind: 'unreachable', from: 'failed', to: 'completed' });
   });
 
   it('parses passes_through property', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  passes_through: validated for idle -> completed\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- passes_through: validated for idle -> completed`);
     const machine = parseMachine(source);
     expect(machine.properties![0]).toEqual({
       kind: 'passes_through',
@@ -88,19 +87,19 @@ describe('Property Parser', () => {
   });
 
   it('parses live property', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  live\n}');
+    const source = baseMachine + `\n## properties\n\n- live`;
     const machine = parseMachine(source);
     expect(machine.properties![0]).toEqual({ kind: 'live' });
   });
 
   it('parses responds property', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  responds: completed from idle within 5\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- responds: completed from idle within 5`);
     const machine = parseMachine(source);
     expect(machine.properties![0]).toEqual({ kind: 'responds', from: 'idle', to: 'completed', within: 5 });
   });
 
   it('parses invariant property without state', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  invariant: ctx.count <= 3\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- invariant: \`ctx.count <= 3\``);
     const machine = parseMachine(source);
     expect(machine.properties![0].kind).toBe('invariant');
     const inv = machine.properties![0] as import('../src/parser/ast.js').InvariantProperty;
@@ -109,21 +108,14 @@ describe('Property Parser', () => {
   });
 
   it('parses invariant property with state', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  invariant: ctx.count < 10 in processing\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- invariant: \`ctx.count < 10\` in processing`);
     const machine = parseMachine(source);
     const inv = machine.properties![0] as import('../src/parser/ast.js').InvariantProperty;
     expect(inv.inState).toBe('processing');
   });
 
   it('parses multiple properties', () => {
-    const source = baseMachine.replace('actions {}', `actions {}
-
-properties {
-  reachable: completed from idle
-  unreachable: completed from failed
-  live
-  responds: completed from idle within 3
-}`);
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: completed from idle\n- unreachable: completed from failed\n- live\n- responds: completed from idle within 3`);
     const machine = parseMachine(source);
     expect(machine.properties!.length).toBe(4);
     expect(machine.properties![0].kind).toBe('reachable');
@@ -133,7 +125,7 @@ properties {
   });
 
   it('parses dot-notation state names', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  reachable: parent.child from root.start\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: parent.child from root.start`);
     const machine = parseMachine(source);
     const prop = machine.properties![0] as import('../src/parser/ast.js').ReachabilityProperty;
     expect(prop.from).toBe('root.start');
@@ -141,8 +133,8 @@ properties {
   });
 
   it('errors on unknown property type', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  bogus: foo\n}');
-    expect(() => parseMachine(source)).toThrow(/Unknown property type 'bogus'/);
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- bogus: foo`);
+    expect(() => parseMachine(source)).toThrow(/Unknown property/i);
   });
 
   it('machine without properties block has no properties field', () => {
@@ -155,21 +147,21 @@ properties {
 
 describe('Property: reachable', () => {
   it('passes when target is reachable', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  reachable: completed from idle\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: completed from idle`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(true);
     expect(result.errors.filter(e => e.severity === 'error')).toHaveLength(0);
   });
 
   it('fails when target is not reachable', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  reachable: idle from failed\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: idle from failed`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.code === 'PROPERTY_REACHABILITY_FAIL')).toBe(true);
   });
 
   it('errors on invalid state name', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  reachable: nonexistent from idle\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: nonexistent from idle`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.code === 'PROPERTY_INVALID_STATE')).toBe(true);
@@ -180,14 +172,14 @@ describe('Property: reachable', () => {
 
 describe('Property: unreachable', () => {
   it('passes when target is truly unreachable', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  unreachable: completed from failed\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- unreachable: completed from failed`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(true);
     expect(result.errors.filter(e => e.severity === 'error')).toHaveLength(0);
   });
 
   it('fails with counterexample when target is reachable', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  unreachable: completed from idle\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- unreachable: completed from idle`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     const err = result.errors.find(e => e.code === 'PROPERTY_EXCLUSION_FAIL');
@@ -202,30 +194,73 @@ describe('Property: passes_through', () => {
   it('passes when all paths go through intermediate', () => {
     // In the base machine: idle -> processing -> validated -> completed
     // The only path from idle to completed goes through validated
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  passes_through: validated for idle -> completed\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- passes_through: validated for idle -> completed`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(true);
   });
 
   it('passes when intermediate is on every path', () => {
     // idle -> processing is the only way out of idle, so processing is on every path
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  passes_through: processing for idle -> completed\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- passes_through: processing for idle -> completed`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(true);
   });
 
   it('fails when a path bypasses the intermediate', () => {
     // Add a shortcut: idle -> completed directly
-    const machineWithShortcut = baseMachine
-      .replace('validated  + fail     -> failed      : _', 'validated  + fail     -> failed      : _\n  idle       + complete -> completed   : _')
-      .replace('actions {}', 'actions {}\n\nproperties {\n  passes_through: processing for idle -> completed\n}');
+    const machineWithShortcut = `# machine TestMachine
+
+## context
+
+| Field  | Type   | Default |
+|--------|--------|---------|
+| count  | int    | 0       |
+| status | string |         |
+
+## events
+
+- go
+- advance
+- fail
+- retry
+- complete
+
+## state idle [initial]
+> Start state
+
+## state processing
+> Processing
+
+## state validated
+> Validated
+
+## state completed [final]
+> Done
+
+## state failed [final]
+> Failed
+
+## transitions
+
+| Source     | Event   | Target    |
+|------------|---------|-----------|
+| idle       | go      | processing |
+| processing | advance | validated  |
+| processing | fail    | failed     |
+| validated  | complete| completed  |
+| validated  | fail    | failed     |
+| idle       | complete| completed  |
+
+## properties
+
+- passes_through: processing for idle -> completed`;
     const result = checkProperties(parseMachine(machineWithShortcut));
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.code === 'PROPERTY_PATH_FAIL')).toBe(true);
   });
 
   it('fails when target is not reachable at all', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  passes_through: processing for failed -> idle\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- passes_through: processing for failed -> idle`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     expect(result.errors[0].message).toContain('not reachable');
@@ -236,34 +271,49 @@ describe('Property: passes_through', () => {
 
 describe('Property: live', () => {
   it('passes when all reachable states can reach a final state', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  live\n}');
+    const source = baseMachine + `\n## properties\n\n- live`;
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(true);
   });
 
   it('fails when a reachable state cannot reach any final state', () => {
     // Create a machine with a trap state
-    const trapMachine = `
-machine TrapMachine
-context {}
-events { go, trap_event }
+    const trapMachine = `# machine TrapMachine
 
-state start [initial] {}
-state normal {}
-state trap {}
-state done [final] {}
+## context
 
-transitions {
-  start  + go         -> normal     : _
-  start  + trap_event -> trap       : _
-  normal + go         -> done       : _
-}
+| Field | Type |
+|-------|------|
+|       |      |
 
-actions {}
+## events
 
-properties {
-  live
-}`;
+- go
+- trap_event
+
+## state start [initial]
+> Start state
+
+## state normal
+> Normal state
+
+## state trap
+> Trap state
+
+## state done [final]
+> Done state
+
+## transitions
+
+| Source | Event      | Target |
+|--------|------------|--------|
+| start  | go         | normal |
+| start  | trap_event | trap   |
+| normal | go         | done   |
+
+## properties
+
+- live`;
     const result = checkProperties(parseMachine(trapMachine));
     expect(result.valid).toBe(false);
     const err = result.errors.find(e => e.code === 'PROPERTY_LIVENESS_FAIL');
@@ -277,14 +327,14 @@ properties {
 describe('Property: responds', () => {
   it('passes when target reachable within bound', () => {
     // idle -> processing -> validated -> completed = 3 transitions
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  responds: completed from idle within 3\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- responds: completed from idle within 3`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(true);
   });
 
   it('fails when target is beyond the bound', () => {
     // idle -> processing -> validated -> completed = 3 transitions, bound is 2
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  responds: completed from idle within 2\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- responds: completed from idle within 2`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     const err = result.errors.find(e => e.code === 'PROPERTY_RESPONSE_FAIL');
@@ -293,7 +343,7 @@ describe('Property: responds', () => {
   });
 
   it('fails when target is not reachable at all', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  responds: idle from failed within 10\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- responds: idle from failed within 10`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     const err = result.errors.find(e => e.code === 'PROPERTY_RESPONSE_FAIL');
@@ -305,7 +355,7 @@ describe('Property: responds', () => {
 
 describe('Property: invariant', () => {
   it('warns as advisory when invariant is valid', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  invariant: ctx.count <= 3\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- invariant: \`ctx.count <= 3\``);
     const result = checkProperties(parseMachine(source));
     // Should pass (no errors), but have an advisory warning
     expect(result.valid).toBe(true);
@@ -313,14 +363,14 @@ describe('Property: invariant', () => {
   });
 
   it('errors on undeclared context field', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  invariant: ctx.nonexistent_field < 5\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- invariant: \`ctx.nonexistent_field < 5\``);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.code === 'PROPERTY_INVARIANT_INVALID')).toBe(true);
   });
 
   it('errors on invalid state reference', () => {
-    const source = baseMachine.replace('actions {}', 'actions {}\n\nproperties {\n  invariant: ctx.count < 5 in nonexistent_state\n}');
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- invariant: \`ctx.count < 5\` in nonexistent_state`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     expect(result.errors.some(e => e.code === 'PROPERTY_INVALID_STATE')).toBe(true);
@@ -354,27 +404,14 @@ describe('Machine Size Limit', () => {
 
 describe('Multiple Properties', () => {
   it('checks all properties and collects all errors', () => {
-    const source = baseMachine.replace('actions {}', `actions {}
-
-properties {
-  reachable: completed from idle
-  unreachable: completed from failed
-  passes_through: processing for idle -> completed
-  live
-  responds: completed from idle within 3
-}`);
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: completed from idle\n- unreachable: completed from failed\n- passes_through: processing for idle -> completed\n- live\n- responds: completed from idle within 3`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(true);
     expect(result.errors.filter(e => e.severity === 'error')).toHaveLength(0);
   });
 
   it('reports multiple failures', () => {
-    const source = baseMachine.replace('actions {}', `actions {}
-
-properties {
-  reachable: idle from failed
-  unreachable: completed from idle
-}`);
+    const source = baseMachine.replace('## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |', `## actions\n\n| Name | Signature |\n|------|----------|\n|      |          |\n\n## properties\n\n- reachable: idle from failed\n- unreachable: completed from idle`);
     const result = checkProperties(parseMachine(source));
     expect(result.valid).toBe(false);
     expect(result.errors.filter(e => e.severity === 'error').length).toBe(2);
@@ -385,118 +422,108 @@ properties {
 
 describe('Payment Processor with Properties', () => {
   it('parses and verifies the payment-with-properties example', () => {
-    const source = `
-machine PaymentWithProperties
+    const source = `# machine PaymentWithProperties
 
-context {
-  order_id: string
-  amount: decimal
-  currency: string
-  retry_count: int = 0
-  payment_token: string?
-  error_message: string?
-}
+## context
 
-events {
-  submit_payment
-  payment_authorized
-  payment_declined
-  payment_timeout
-  retry_requested
-  cancel_requested
-  refund_requested
-  settlement_confirmed
-}
+| Field         | Type    | Default |
+|---------------|---------|---------|
+| order_id      | string  |         |
+| amount        | decimal |         |
+| currency      | string  |         |
+| retry_count   | int     | 0       |
+| payment_token | string? |         |
+| error_message | string? |         |
 
-state idle [initial] {
-  description: "Waiting for a payment submission"
-  on_entry: -> reset_context
-}
+## events
 
-state validating {
-  description: "Validating payment details"
-  on_entry: -> validate_payment_details
-}
+- submit_payment
+- payment_authorized
+- payment_declined
+- payment_timeout
+- retry_requested
+- cancel_requested
+- refund_requested
+- settlement_confirmed
 
-state authorizing {
-  description: "Waiting for gateway response"
-  on_entry: -> send_authorization_request
-}
+## state idle [initial]
+> Waiting for a payment submission
+- on_entry: reset_context
 
-state authorized {
-  description: "Payment authorized"
-  on_entry: -> log_authorization
-}
+## state validating
+> Validating payment details
+- on_entry: validate_payment_details
 
-state declined {
-  description: "Payment declined"
-  on_entry: -> format_decline_reason
-}
+## state authorizing
+> Waiting for gateway response
+- on_entry: send_authorization_request
 
-state failed [final] {
-  description: "Terminal failure"
-  on_entry: -> record_failure
-}
+## state authorized
+> Payment authorized
+- on_entry: log_authorization
 
-state settled [final] {
-  description: "Payment settled"
-  on_entry: -> record_settlement
-}
+## state declined
+> Payment declined
+- on_entry: format_decline_reason
 
-guards {
-  can_retry: ctx.retry_count < 3
-}
+## state failed [final]
+> Terminal failure
+- on_entry: record_failure
 
-transitions {
-  idle           + submit_payment        -> validating    : initialize_payment
-  validating     + payment_authorized    -> authorizing   : prepare_auth_request
-  validating     + payment_declined      -> declined      : _
-  authorizing    + payment_authorized    -> authorized    : record_auth_code
-  authorizing    + payment_declined      -> declined      : increment_retry
-  authorizing    + payment_timeout       -> declined      : set_timeout_error
-  declined       + retry_requested [can_retry]   -> validating : increment_retry
-  declined       + retry_requested [!can_retry]  -> failed     : set_max_retries_error
-  declined       + cancel_requested      -> failed        : _
-  authorized     + settlement_confirmed  -> settled       : _
-  authorized     + refund_requested      -> failed        : process_refund
-}
+## state settled [final]
+> Payment settled
+- on_entry: record_settlement
 
-actions {
-  reset_context:             () -> Context
-  initialize_payment:        (ctx: Context) -> Context
-  validate_payment_details:  (ctx: Context) -> Context
-  send_authorization_request: (ctx: Context) -> Context
-  prepare_auth_request:      (ctx: Context) -> Context
-  record_auth_code:          (ctx: Context) -> Context
-  increment_retry:           (ctx: Context) -> Context
-  set_timeout_error:         (ctx: Context) -> Context
-  set_max_retries_error:     (ctx: Context) -> Context
-  format_decline_reason:     (ctx: Context) -> Context
-  process_refund:            (ctx: Context) -> Context
-  record_failure:            (ctx: Context) -> Context
-  log_authorization:         (ctx: Context) -> Context
-  record_settlement:         (ctx: Context) -> Context
-}
+## transitions
 
-properties {
-  # Settlement requires authorization
-  passes_through: authorized for idle -> settled
+| Source      | Event                | Guard      | Target      | Action                |
+|-------------|----------------------|------------|-------------|-----------------------|
+| idle        | submit_payment       |            | validating  | initialize_payment    |
+| validating  | payment_authorized   |            | authorizing | prepare_auth_request  |
+| validating  | payment_declined     |            | declined    |                       |
+| authorizing | payment_authorized   |            | authorized  | record_auth_code      |
+| authorizing | payment_declined     |            | declined    | increment_retry       |
+| authorizing | payment_timeout      |            | declined    | set_timeout_error     |
+| declined    | retry_requested      | can_retry  | validating  | increment_retry       |
+| declined    | retry_requested      | !can_retry | failed      | set_max_retries_error |
+| declined    | cancel_requested     |            | failed      |                       |
+| authorized  | settlement_confirmed  |            | settled     |                       |
+| authorized  | refund_requested     |            | failed      | process_refund        |
 
-  # Failed payments never settle
-  unreachable: settled from failed
+## guards
 
-  # Authorization is reachable
-  reachable: authorized from idle
+| Name            | Expression                    |
+|-----------------|-------------------------------|
+| can_retry       | \`ctx.retry_count < 3\`       |
+| has_valid_token | \`ctx.payment_token != null\`  |
 
-  # Machine is live
-  live
+## actions
 
-  # Settlement within 5 transitions
-  responds: settled from idle within 5
+| Name                       | Signature                                 |
+|----------------------------|-------------------------------------------|
+| reset_context              | \`() -> Context\`                         |
+| initialize_payment         | \`(ctx, event) -> Context\`               |
+| validate_payment_details   | \`(ctx) -> Context\`                       |
+| send_authorization_request | \`(ctx) -> Context + Effect<AuthRequest>\` |
+| prepare_auth_request       | \`(ctx) -> Context\`                       |
+| record_auth_code           | \`(ctx, event) -> Context\`               |
+| increment_retry            | \`(ctx) -> Context\`                       |
+| set_timeout_error          | \`(ctx) -> Context\`                       |
+| set_max_retries_error      | \`(ctx) -> Context\`                       |
+| format_decline_reason      | \`(ctx, event) -> Context\`               |
+| process_refund             | \`(ctx) -> Context + Effect<RefundRequest>\` |
+| record_failure             | \`(ctx) -> Context\`                       |
+| log_authorization          | \`(ctx) -> Context\`                       |
+| record_settlement          | \`(ctx) -> Context\`                       |
 
-  # Retry bound (advisory)
-  invariant: ctx.retry_count <= 3
-}`;
+## properties
+
+- passes_through: authorized for idle -> settled
+- unreachable: settled from failed
+- reachable: authorized from idle
+- live
+- responds: settled from idle within 5
+- invariant: \`ctx.retry_count <= 3\``;
 
     const machine = parseMachine(source);
     expect(machine.properties).toBeDefined();

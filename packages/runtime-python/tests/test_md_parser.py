@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from orca_runtime_python.parser import parse_orca_md, parse_orca_auto, parse_orca
+from orca_runtime_python.parser import parse_orca_md, parse_orca_auto
 
 EXAMPLES_DIR = Path(__file__).parent.parent.parent / "orca-lang" / "examples"
 
@@ -52,36 +52,11 @@ def test_auto_detect_md():
     assert machine.name == "PaymentProcessor"
 
 
-def test_auto_detect_dsl():
-    """Auto-detect DSL format by filename (legacy support)."""
-    # Inline DSL source for backward compatibility testing
-    source = """machine TestMachine
-context { value: int = 0 }
-events { tick }
-state idle [initial] {}
-transitions { idle + tick -> idle }
-actions { do_nothing: () -> Context }"""
-    machine = parse_orca_auto(source, "test.orca")
-    assert machine.name == "TestMachine"
-
-
 def test_auto_detect_content_sniff_md():
     """Auto-detect markdown by content sniffing."""
     source = (EXAMPLES_DIR / "payment-processor.orca.md").read_text()
     machine = parse_orca_auto(source)
     assert machine.name == "PaymentProcessor"
-
-
-def test_auto_detect_content_sniff_dsl():
-    """Auto-detect DSL by content sniffing (legacy support)."""
-    # Inline DSL source for backward compatibility testing
-    source = """machine LegacyMachine
-context { x: int }
-events { go }
-state start [initial] {}
-transitions { start + go -> start }"""
-    machine = parse_orca_auto(source)
-    assert machine.name == "LegacyMachine"
 
 
 def test_parse_parallel_md():
