@@ -1,11 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseMarkdown } from '../src/parser/markdown-parser.js';
+import { parseMachine } from '../src/parser/markdown-parser.js';
 import { compileToXState } from '../src/compiler/xstate.js';
 import { compileToMermaid } from '../src/compiler/mermaid.js';
-
-function parseMachine(source: string) {
-  return parseMarkdown(source).machine;
-}
 
 describe('XState Compiler', () => {
   it('compiles a simple machine to XState', () => {

@@ -16,6 +16,13 @@ export interface ParallelDef {
   sync?: SyncStrategy;
 }
 
+export interface InvokeDef {
+  machine: string;
+  input?: Record<string, string>;
+  onDone?: string;
+  onError?: string;
+}
+
 export interface StateDef {
   name: string;
   isInitial: boolean;
@@ -29,6 +36,7 @@ export interface StateDef {
   parent?: string;
   timeout?: { duration: string; target: string };
   ignoredEvents: string[];
+  invoke?: InvokeDef;
 }
 
 export interface Transition {

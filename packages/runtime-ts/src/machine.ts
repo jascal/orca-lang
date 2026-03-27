@@ -46,6 +46,8 @@ export class OrcaMachine {
   private active = false;
   private actionHandlers = new Map<string, ActionHandler>();
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private childMachines = new Map<string, OrcaMachine>();
+  private siblingMachines?: Map<string, MachineDef>;
 
   constructor(
     definition: MachineDef,
@@ -58,6 +60,14 @@ export class OrcaMachine {
     this.context = context ?? { ...definition.context };
     this.onTransition = onTransition;
     this.state = new StateValue(this.getInitialState());
+  }
+
+  /**
+   * Register sibling machines available for invocation.
+   * Call this before start() when using multi-machine files.
+   */
+  registerMachines(machines: Map<string, MachineDef>): void {
+    this.siblingMachines = machines;
   }
 
   registerAction(name: string, handler: ActionHandler): void {
@@ -90,15 +100,21 @@ export class OrcaMachine {
 
   /**
    * Capture the current machine state as a serializable snapshot.
-   * The snapshot includes state value, context, and timestamp.
+   * The snapshot includes state value, context, timestamp, and child machine snapshots.
    * Action handlers are NOT included — re-register them after restore.
    */
-  snapshot(): { state: string | Record<string, unknown>; context: Record<string, unknown>; timestamp: number } {
+  snapshot(): { state: string | Record<string, unknown>; context: Record<string, unknown>; children?: Record<string, ReturnType<OrcaMachine['snapshot']>>; timestamp: number } {
+    const children: Record<string, ReturnType<OrcaMachine['snapshot']>> = {};
+    for (const [stateName, child] of this.childMachines) {
+      children[stateName] = child.snapshot();
+    }
+
     return {
       state: typeof this.state.value === 'string'
         ? this.state.value
         : JSON.parse(JSON.stringify(this.state.value)),
       context: JSON.parse(JSON.stringify(this.context)),
+      children: Object.keys(children).length > 0 ? children : undefined,
       timestamp: Date.now(),
     };
   }
@@ -158,6 +174,13 @@ export class OrcaMachine {
     }
 
     this.cancelTimeout();
+
+    // Stop all child machines
+    for (const [stateName, child] of this.childMachines) {
+      await child.stop();
+    }
+    this.childMachines.clear();
+
     this.active = false;
 
     await this.eventBus.publish({
@@ -610,7 +633,17 @@ export class OrcaMachine {
 
   private async executeEntryActions(stateName: string): Promise<void> {
     const stateDef = this.findStateDef(stateName);
-    if (!stateDef || !stateDef.onEntry) {
+    if (!stateDef) {
+      return;
+    }
+
+    // Handle machine invocation
+    if (stateDef.invoke) {
+      await this.startChildMachine(stateName, stateDef.invoke);
+      return; // Invoke replaces entry action
+    }
+
+    if (!stateDef.onEntry) {
       return;
     }
 
@@ -659,10 +692,18 @@ export class OrcaMachine {
 
   private async executeExitActions(stateName: string): Promise<void> {
     const stateDef = this.findStateDef(stateName);
-    if (!stateDef || !stateDef.onExit) {
+    if (!stateDef) {
       return;
     }
-    await this.executeAction(stateDef.onExit);
+
+    // Stop any child machine associated with this state
+    if (stateDef.invoke) {
+      await this.stopChildMachine(stateName);
+    }
+
+    if (stateDef.onExit) {
+      await this.executeAction(stateDef.onExit);
+    }
   }
 
   private async executeAction(actionName: string, eventPayload?: Record<string, unknown>): Promise<void> {
@@ -745,6 +786,67 @@ export class OrcaMachine {
         to: this.state.toString(),
       },
     });
+  }
+
+  /**
+   * Start a child machine when entering an invoke state.
+   */
+  private async startChildMachine(stateName: string, invokeDef: { machine: string; input?: Record<string, string>; onDone?: string; onError?: string }): Promise<void> {
+    if (!this.siblingMachines) {
+      throw new Error(`Cannot invoke machine '${invokeDef.machine}': no sibling machines registered. Call registerMachines() first.`);
+    }
+
+    const childDef = this.siblingMachines.get(invokeDef.machine);
+    if (!childDef) {
+      throw new Error(`Cannot invoke machine '${invokeDef.machine}': machine not found in sibling machines.`);
+    }
+
+    // Map input from parent context
+    const childContext: Record<string, unknown> = {};
+    if (invokeDef.input) {
+      for (const [key, value] of Object.entries(invokeDef.input)) {
+        // value is like "ctx.order_id" - extract field name
+        const fieldName = value.replace(/^ctx\./, '');
+        childContext[key] = this.context[fieldName] ?? null;
+      }
+    }
+
+    // Create child machine with callback to handle completion
+    const parentMachine = this;
+    const childMachine = new OrcaMachine(
+      childDef,
+      this.eventBus,
+      childContext,
+      // onTransition callback - parent handles when child completes
+      async (from, to) => {
+        // Check if child reached a final state
+        const childStateDef = childMachine.definition.states.find(s => s.name === to.toString());
+        if (childStateDef?.isFinal) {
+          // Child completed - emit onDone to self
+          if (invokeDef.onDone) {
+            await parentMachine.send(invokeDef.onDone, {
+              finalState: to.toString(),
+              context: childMachine.snapshot().context,
+            });
+          }
+        }
+      }
+    );
+    this.childMachines.set(stateName, childMachine);
+
+    // Start the child machine
+    await childMachine.start();
+  }
+
+  /**
+   * Stop a child machine when exiting an invoke state.
+   */
+  private async stopChildMachine(stateName: string): Promise<void> {
+    const child = this.childMachines.get(stateName);
+    if (child) {
+      await child.stop();
+      this.childMachines.delete(stateName);
+    }
   }
 
   private findStateDef(stateName: string): StateDef | null {

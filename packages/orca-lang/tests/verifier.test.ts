@@ -1,12 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { parseMarkdown } from '../src/parser/markdown-parser.js';
+import { parseMachine } from '../src/parser/markdown-parser.js';
 import { checkStructural } from '../src/verifier/structural.js';
 import { checkCompleteness } from '../src/verifier/completeness.js';
 import { checkDeterminism } from '../src/verifier/determinism.js';
-
-function parseMachine(source: string) {
-  return parseMarkdown(source).machine;
-}
 
 describe('Structural Verifier', () => {
   it('passes for valid machine', () => {

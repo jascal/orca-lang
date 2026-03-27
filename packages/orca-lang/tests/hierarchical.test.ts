@@ -1,13 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { parseMarkdown } from '../src/parser/markdown-parser.js';
+import { parseMachine } from '../src/parser/markdown-parser.js';
 import { checkStructural, analyzeMachine, flattenStates } from '../src/verifier/structural.js';
 import { checkCompleteness } from '../src/verifier/completeness.js';
 import { compileToXState, compileToXStateMachine } from '../src/compiler/xstate.js';
 import { compileToMermaid } from '../src/compiler/mermaid.js';
-
-function parseMachine(source: string) {
-  return parseMarkdown(source).machine;
-}
 
 const HIERARCHICAL_SOURCE = `# machine Game
 

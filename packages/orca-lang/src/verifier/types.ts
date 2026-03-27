@@ -35,3 +35,10 @@ export interface MachineAnalysis {
   orphanEvents: string[];
   orphanActions: string[];
 }
+
+export interface FileAnalysis {
+  machines: Map<string, MachineAnalysis>;
+  invocationGraph: Map<string, string[]>;  // machine name -> machines it invokes
+  errors: VerificationError[];
+  warnings: VerificationError[];
+}

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseMarkdown } from '../src/parser/markdown-parser.js';
+import { parseMarkdown, parseMachine } from '../src/parser/markdown-parser.js';
 import { machineToMarkdown } from '../src/parser/ast-to-markdown.js';
 
 describe('Markdown Parser', () => {
   describe('minimal machine', () => {
     it('parses a simple two-state machine', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine Minimal
 
 ## events
@@ -26,15 +26,15 @@ describe('Markdown Parser', () => {
 |--------|-------|-------|--------|--------|
 | idle | tick | | done | |
 `);
-      expect(result.machine.name).toBe('Minimal');
-      expect(result.machine.states).toHaveLength(2);
-      expect(result.machine.states[0].name).toBe('idle');
-      expect(result.machine.states[0].isInitial).toBe(true);
-      expect(result.machine.states[0].description).toBe('Waiting for tick');
-      expect(result.machine.states[1].name).toBe('done');
-      expect(result.machine.states[1].isFinal).toBe(true);
-      expect(result.machine.transitions).toHaveLength(1);
-      expect(result.machine.transitions[0]).toEqual({
+      expect(machine.name).toBe('Minimal');
+      expect(machine.states).toHaveLength(2);
+      expect(machine.states[0].name).toBe('idle');
+      expect(machine.states[0].isInitial).toBe(true);
+      expect(machine.states[0].description).toBe('Waiting for tick');
+      expect(machine.states[1].name).toBe('done');
+      expect(machine.states[1].isFinal).toBe(true);
+      expect(machine.transitions).toHaveLength(1);
+      expect(machine.transitions[0]).toEqual({
         source: 'idle', event: 'tick', target: 'done',
       });
     });
@@ -42,7 +42,7 @@ describe('Markdown Parser', () => {
 
   describe('context parsing', () => {
     it('parses context table with types and defaults', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine CtxTest
 
 ## context
@@ -63,7 +63,7 @@ describe('Markdown Parser', () => {
 | Source | Event | Guard | Target | Action |
 |--------|-------|-------|--------|--------|
 `);
-      const ctx = result.machine.context;
+      const ctx = machine.context;
       expect(ctx).toHaveLength(6);
       expect(ctx[0]).toEqual({ name: 'name', type: { kind: 'string' } });
       expect(ctx[1]).toEqual({ name: 'count', type: { kind: 'int' }, defaultValue: '0' });
@@ -76,7 +76,7 @@ describe('Markdown Parser', () => {
 
   describe('events parsing', () => {
     it('parses bullet list events', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine EvTest
 
 ## events
@@ -87,12 +87,12 @@ describe('Markdown Parser', () => {
 
 ## state s [initial]
 `);
-      expect(result.machine.events).toHaveLength(3);
-      expect(result.machine.events.map(e => e.name)).toEqual(['start', 'stop', 'reset']);
+      expect(machine.events).toHaveLength(3);
+      expect(machine.events.map(e => e.name)).toEqual(['start', 'stop', 'reset']);
     });
 
     it('parses comma-separated events on one line', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine EvTest
 
 ## events
@@ -102,8 +102,8 @@ describe('Markdown Parser', () => {
 
 ## state s [initial]
 `);
-      expect(result.machine.events).toHaveLength(5);
-      expect(result.machine.events.map(e => e.name)).toEqual([
+      expect(machine.events).toHaveLength(5);
+      expect(machine.events.map(e => e.name)).toEqual([
         'go_north', 'go_south', 'attack', 'defend', 'flee',
       ]);
     });
@@ -111,7 +111,7 @@ describe('Markdown Parser', () => {
 
   describe('state parsing', () => {
     it('parses state properties (on_entry, on_exit, timeout, ignore)', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine StateTest
 
 ## events
@@ -127,7 +127,7 @@ describe('Markdown Parser', () => {
 
 ## state timed_out [final]
 `);
-      const s = result.machine.states[0];
+      const s = machine.states[0];
       expect(s.name).toBe('idle');
       expect(s.description).toBe('Waiting');
       expect(s.onEntry).toBe('setup');
@@ -137,7 +137,7 @@ describe('Markdown Parser', () => {
     });
 
     it('parses comma-separated ignore events', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine IgnoreTest
 
 ## events
@@ -147,13 +147,13 @@ describe('Markdown Parser', () => {
 ## state s [initial]
 - ignore: a, b, c
 `);
-      expect(result.machine.states[0].ignoredEvents).toEqual(['a', 'b', 'c']);
+      expect(machine.states[0].ignoredEvents).toEqual(['a', 'b', 'c']);
     });
   });
 
   describe('guards parsing', () => {
     it('parses guard expressions from table', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine GuardTest
 
 ## state s [initial]
@@ -166,23 +166,23 @@ describe('Markdown Parser', () => {
 | has_token | \`ctx.payment_token != null\` |
 | always | \`true\` |
 `);
-      expect(result.machine.guards).toHaveLength(3);
-      expect(result.machine.guards[0].name).toBe('can_retry');
-      expect(result.machine.guards[0].expression).toEqual({
+      expect(machine.guards).toHaveLength(3);
+      expect(machine.guards[0].name).toBe('can_retry');
+      expect(machine.guards[0].expression).toEqual({
         kind: 'compare', op: 'lt',
         left: { kind: 'variable', path: ['ctx', 'retry_count'] },
         right: { kind: 'value', type: 'number', value: 3 },
       });
-      expect(result.machine.guards[1].expression).toEqual({
+      expect(machine.guards[1].expression).toEqual({
         kind: 'compare', op: 'ne',
         left: { kind: 'variable', path: ['ctx', 'payment_token'] },
         right: { kind: 'value', type: 'null', value: null },
       });
-      expect(result.machine.guards[2].expression).toEqual({ kind: 'true' });
+      expect(machine.guards[2].expression).toEqual({ kind: 'true' });
     });
 
     it('parses complex guard expressions with and/or', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine ComplexGuard
 
 ## state s [initial]
@@ -193,14 +193,14 @@ describe('Markdown Parser', () => {
 |------|------------|
 | complex | \`(ctx.health > 0 and ctx.ammo > 0) or ctx.mode == "god"\` |
 `);
-      const expr = result.machine.guards[0].expression;
+      const expr = machine.guards[0].expression;
       expect(expr.kind).toBe('or');
     });
   });
 
   describe('transitions parsing', () => {
     it('parses transitions table with guards', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine TransTest
 
 ## state idle [initial]
@@ -214,16 +214,16 @@ describe('Markdown Parser', () => {
 | idle | retry | can_retry | idle | inc |
 | idle | retry | !can_retry | done | fail |
 `);
-      expect(result.machine.transitions).toHaveLength(3);
-      expect(result.machine.transitions[0]).toEqual({
+      expect(machine.transitions).toHaveLength(3);
+      expect(machine.transitions[0]).toEqual({
         source: 'idle', event: 'start', target: 'done', action: 'do_start',
       });
-      expect(result.machine.transitions[1].guard).toEqual({ name: 'can_retry', negated: false });
-      expect(result.machine.transitions[2].guard).toEqual({ name: 'can_retry', negated: true });
+      expect(machine.transitions[1].guard).toEqual({ name: 'can_retry', negated: false });
+      expect(machine.transitions[2].guard).toEqual({ name: 'can_retry', negated: true });
     });
 
     it('treats _ action as no action', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine ActionTest
 
 ## state s [initial]
@@ -235,13 +235,13 @@ describe('Markdown Parser', () => {
 |--------|-------|-------|--------|--------|
 | s | ev | | t | _ |
 `);
-      expect(result.machine.transitions[0].action).toBeUndefined();
+      expect(machine.transitions[0].action).toBeUndefined();
     });
   });
 
   describe('actions parsing', () => {
     it('parses action signatures from table', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine ActTest
 
 ## state s [initial]
@@ -254,14 +254,14 @@ describe('Markdown Parser', () => {
 | handle | \`(ctx, event) -> Context\` |
 | send | \`(ctx) -> Context + Effect<Request>\` |
 `);
-      expect(result.machine.actions).toHaveLength(3);
-      expect(result.machine.actions[0]).toEqual({
+      expect(machine.actions).toHaveLength(3);
+      expect(machine.actions[0]).toEqual({
         name: 'reset', parameters: [], returnType: 'Context', hasEffect: false, effectType: undefined,
       });
-      expect(result.machine.actions[1]).toEqual({
+      expect(machine.actions[1]).toEqual({
         name: 'handle', parameters: ['ctx', 'event'], returnType: 'Context', hasEffect: false, effectType: undefined,
       });
-      expect(result.machine.actions[2]).toEqual({
+      expect(machine.actions[2]).toEqual({
         name: 'send', parameters: ['ctx'], returnType: 'Context', hasEffect: true, effectType: 'Request',
       });
     });
@@ -269,7 +269,7 @@ describe('Markdown Parser', () => {
 
   describe('hierarchical states', () => {
     it('parses nested states from heading levels', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine HierTest
 
 ## events
@@ -299,10 +299,10 @@ describe('Markdown Parser', () => {
 
 ## state game_over [final]
 `);
-      expect(result.machine.states).toHaveLength(4);
-      expect(result.machine.states[0].name).toBe('idle');
+      expect(machine.states).toHaveLength(4);
+      expect(machine.states[0].name).toBe('idle');
 
-      const exploration = result.machine.states[1];
+      const exploration = machine.states[1];
       expect(exploration.name).toBe('exploration');
       expect(exploration.contains).toHaveLength(2);
       expect(exploration.contains![0].name).toBe('overworld');
@@ -311,7 +311,7 @@ describe('Markdown Parser', () => {
       expect(exploration.contains![1].name).toBe('dungeon');
       expect(exploration.contains![1].parent).toBe('exploration');
 
-      const combat = result.machine.states[2];
+      const combat = machine.states[2];
       expect(combat.contains).toHaveLength(2);
       expect(combat.contains![0].name).toBe('attacking');
       expect(combat.contains![0].parent).toBe('combat');
@@ -320,7 +320,7 @@ describe('Markdown Parser', () => {
 
   describe('parallel states', () => {
     it('parses parallel regions', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine ParallelTest
 
 ## events
@@ -353,9 +353,9 @@ describe('Markdown Parser', () => {
 
 ## state completed [final]
 `);
-      expect(result.machine.states).toHaveLength(3);
+      expect(machine.states).toHaveLength(3);
 
-      const processing = result.machine.states[1];
+      const processing = machine.states[1];
       expect(processing.name).toBe('processing');
       expect(processing.onEntry).toBe('initOrder');
       expect(processing.onDone).toBe('completed');
@@ -378,7 +378,7 @@ describe('Markdown Parser', () => {
     });
 
     it('parses sync strategy annotation', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine SyncTest
 
 ## state idle [initial]
@@ -398,13 +398,13 @@ describe('Markdown Parser', () => {
 
 ## state done [final]
 `);
-      expect(result.machine.states[1].parallel!.sync).toBe('any-final');
+      expect(machine.states[1].parallel!.sync).toBe('any-final');
     });
   });
 
   describe('properties parsing', () => {
     it('parses all property types', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine PropTest
 
 ## state idle [initial]
@@ -421,7 +421,7 @@ describe('Markdown Parser', () => {
 - responds: settled from idle within 5
 - invariant: \`ctx.retry_count <= 3\`
 `);
-      const props = result.machine.properties!;
+      const props = machine.properties!;
       expect(props).toHaveLength(6);
       expect(props[0]).toEqual({ kind: 'reachable', from: 'idle', to: 'auth' });
       expect(props[1]).toEqual({ kind: 'unreachable', from: 'failed', to: 'settled' });
@@ -432,7 +432,7 @@ describe('Markdown Parser', () => {
     });
 
     it('parses invariant with in-state scope', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine InvTest
 
 ## state combat [initial]
@@ -441,7 +441,7 @@ describe('Markdown Parser', () => {
 
 - invariant: \`ctx.health > 0\` in combat
 `);
-      const prop = result.machine.properties![0];
+      const prop = machine.properties![0];
       expect(prop.kind).toBe('invariant');
       if (prop.kind === 'invariant') {
         expect(prop.inState).toBe('combat');
@@ -451,7 +451,7 @@ describe('Markdown Parser', () => {
 
   describe('embedded machine support', () => {
     it('ignores prose before machine heading', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # Design Document
 
 This is some prose that should be ignored.
@@ -471,12 +471,12 @@ This is some prose that should be ignored.
 |--------|-------|-------|--------|--------|
 | idle | start | | done | |
 `);
-      expect(result.machine.name).toBe('MyMachine');
-      expect(result.machine.states).toHaveLength(2);
+      expect(machine.name).toBe('MyMachine');
+      expect(machine.states).toHaveLength(2);
     });
 
     it('ignores fenced code blocks', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine CodeBlockTest
 
 \`\`\`
@@ -490,15 +490,15 @@ This is inside a code block and should be ignored.
 
 ## state s [initial]
 `);
-      expect(result.machine.name).toBe('CodeBlockTest');
-      expect(result.machine.states).toHaveLength(1);
-      expect(result.machine.states[0].name).toBe('s');
+      expect(machine.name).toBe('CodeBlockTest');
+      expect(machine.states).toHaveLength(1);
+      expect(machine.states[0].name).toBe('s');
     });
   });
 
   describe('sections in any order', () => {
     it('accepts sections in non-standard order', () => {
-      const result = parseMarkdown(`
+      const machine = parseMachine(`
 # machine OrderTest
 
 ## guards
@@ -525,12 +525,12 @@ This is inside a code block and should be ignored.
 |-------|------|---------|
 | x | int | 0 |
 `);
-      expect(result.machine.name).toBe('OrderTest');
-      expect(result.machine.context).toHaveLength(1);
-      expect(result.machine.events).toHaveLength(1);
-      expect(result.machine.guards).toHaveLength(1);
-      expect(result.machine.states).toHaveLength(1);
-      expect(result.machine.transitions).toHaveLength(1);
+      expect(machine.name).toBe('OrderTest');
+      expect(machine.context).toHaveLength(1);
+      expect(machine.events).toHaveLength(1);
+      expect(machine.guards).toHaveLength(1);
+      expect(machine.states).toHaveLength(1);
+      expect(machine.transitions).toHaveLength(1);
     });
   });
 });
@@ -562,9 +562,9 @@ describe('AST to Markdown Converter', () => {
 describe('Round-trip: Markdown → AST → Markdown → AST (idempotency)', () => {
   function roundTripMd(mdSource: string) {
     const mdResult = parseMarkdown(mdSource);
-    const md2 = machineToMarkdown(mdResult.machine);
+    const md2 = machineToMarkdown(mdResult.file.machines[0]);
     const mdResult2 = parseMarkdown(md2);
-    return { first: mdResult.machine, second: mdResult2.machine };
+    return { first: mdResult.file.machines[0], second: mdResult2.file.machines[0] };
   }
 
   function stripParentsAndTokens(machine: any): any {

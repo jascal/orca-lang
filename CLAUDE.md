@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Orca (Orchestrated State Machine Language)** - A two-layer architecture for LLM code generation that separates program topology (state machine structure) from computation (action functions).
 
-This is a **pnpm monorepo** containing the core language, two runtimes (TypeScript and Python), and two demo applications.
+This is a **pnpm monorepo** containing the core language, runtimes (TypeScript, Python, and planned Go), and demo applications.
 
 ## Monorepo Structure
 
@@ -15,8 +15,10 @@ packages/
   orca-lang/       Core language: parser, verifier, XState/Mermaid compiler, CLI
   runtime-ts/      TypeScript async runtime: event bus, OrcaMachine, effect router
   runtime-python/  Python async runtime: event bus, OrcaMachine, effect handlers
+  runtime-go/      (planned) Go runtime: goroutine-based event bus, OrcaMachine, effect handlers
   demo-ts/         Text adventure game demo (uses runtime-ts)
   demo-python/     Agent framework demo (uses runtime-python)
+  demo-go/         (planned) Ride-hailing trip coordinator demo (uses runtime-go)
 ```
 
 ## Setup
@@ -87,8 +89,9 @@ Agent framework demo with 4 scenarios: order processing (8-state workflow), mult
 ## Cross-Package Dependencies
 
 ```
-demo-ts  ──depends on──>  runtime-ts     (pnpm workspace:*)
+demo-ts      ──depends on──>  runtime-ts      (pnpm workspace:*)
 demo-python  ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
+demo-go      ──depends on──>  runtime-go      (go module dependency)
 ```
 
 The orca-lang package is independent — runtimes implement their own parsers and can operate without it.
@@ -99,7 +102,9 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 
 **Phase 3.5 Complete**: Markdown syntax migration — `.orca.md` format with tables, headings, and bullet lists. Auto-detection selects the appropriate parser. All runtimes support markdown format. 137 orca-lang tests (26 markdown parser), 63 runtime-ts tests, 72 runtime-python tests (8 markdown parser). Skill prompts updated for markdown generation.
 
-**Next major milestone — Phase 4: Additional Compilation Targets** — Go runtime is next priority (TypeScript and Python runtimes already exist).
+**Phase 4 Complete**: Machine invocation — state machines calling other state machines. `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, cross-machine verifier (cycle detection, child reachability, machine resolution), XState invoke config (`__machine__:Name`), runtime-ts and runtime-python child lifecycle (start on entry, stop on exit, completion events, snapshot/restore). 128 orca-lang tests, 63 runtime-ts tests, 68 runtime-python tests.
+
+**Next major milestone — Phase 4.5: Go Runtime + Ride-Hailing Demo** — `runtime-go` package to feature parity with TS/Python runtimes (including machine invocation), then a 5-machine ride-hailing trip coordinator demo built in Go. Design doc: `docs/demo-ride-hailing.md`.
 
 ## Known Limitations (v1 parallel regions)
 - `any-final` sync strategy has no native XState equivalent — works in standalone runtimes only

@@ -27,6 +27,15 @@ class ParallelDef:
 
 
 @dataclass
+class InvokeDef:
+    """Machine invocation definition."""
+    machine: str
+    input: dict[str, str] | None = None
+    on_done: str | None = None
+    on_error: str | None = None
+
+
+@dataclass
 class StateDef:
     """State definition in an Orca machine."""
     name: str
@@ -41,6 +50,7 @@ class StateDef:
     parent: str | None = None
     timeout: dict[str, str] | None = None  # {duration, target}
     ignored_events: list[str] = field(default_factory=list)
+    invoke: InvokeDef | None = None
 
 
 @dataclass

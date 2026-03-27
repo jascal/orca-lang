@@ -14,8 +14,12 @@ import { getCodeGenerator } from './generators/index.js';
 import { CodeGeneratorType } from './config/types.js';
 
 /** Parse an Orca machine definition file (markdown format) */
-function parseFile(filePath: string, source: string): { machine: MachineDef } {
-  return parseMarkdown(source);
+function parseFile(filePath: string, source: string): MachineDef {
+  const { file } = parseMarkdown(source);
+  if (file.machines.length > 1) {
+    throw new Error(`File ${filePath} contains multiple machines.`);
+  }
+  return file.machines[0];
 }
 
 export interface SkillError {
@@ -77,8 +81,7 @@ export async function verifySkill(filePath: string): Promise<VerifySkillResult> 
 
   let machine: MachineDef;
   try {
-    const result = parseFile(filePath, source);
-    machine = result.machine;
+    machine = parseFile(filePath, source);
   } catch (err) {
     // Parse error - return as verification error
     const message = err instanceof Error ? err.message : String(err);
@@ -132,12 +135,12 @@ export async function verifySkill(filePath: string): Promise<VerifySkillResult> 
 
 export async function compileSkill(filePath: string, target: 'xstate' | 'mermaid'): Promise<CompileSkillResult> {
   const source = readFileSync(filePath, 'utf-8');
-  const result = parseFile(filePath, source);
+  const machine = parseFile(filePath, source);
 
   // Run verification to get warnings
-  const structural = checkStructural(result.machine);
-  const completeness = checkCompleteness(result.machine);
-  const determinism = checkDeterminism(result.machine);
+  const structural = checkStructural(machine);
+  const completeness = checkCompleteness(machine);
+  const determinism = checkDeterminism(machine);
 
   const warnings: SkillError[] = [
     ...structural.errors.filter(e => e.severity === 'warning').map(e => ({
@@ -158,8 +161,8 @@ export async function compileSkill(filePath: string, target: 'xstate' | 'mermaid
   ];
 
   const output = target === 'xstate'
-    ? compileToXState(result.machine)
-    : compileToMermaid(result.machine);
+    ? compileToXState(machine)
+    : compileToMermaid(machine);
 
   return {
     status: 'success',
@@ -177,8 +180,7 @@ export async function generateActionsSkill(
   generateTests: boolean = false
 ): Promise<GenerateActionsResult> {
   const source = readFileSync(filePath, 'utf-8');
-  const result = parseFile(filePath, source);
-  const machine = result.machine;
+  const machine = parseFile(filePath, source);
 
   const actions: ActionScaffold[] = machine.actions.map(action => ({
     name: action.name,
@@ -510,8 +512,7 @@ export async function refineSkill(
   });
 
   const source = readFileSync(filePath, 'utf-8');
-  const result = parseFile(filePath, source);
-  const machine = result.machine;
+  const machine = parseFile(filePath, source);
 
   const isMd = filePath.endsWith('.orca.md') || filePath.endsWith('.md');
 

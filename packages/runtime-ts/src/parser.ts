@@ -16,6 +16,7 @@ import type {
   ParallelDef,
   SyncStrategy,
   ActionSignature,
+  InvokeDef,
 } from "./types.js";
 import { StateValue } from "./types.js";
 
@@ -34,8 +35,9 @@ interface MdHeading { kind: 'heading'; level: number; text: string }
 interface MdTable { kind: 'table'; headers: string[]; rows: string[][] }
 interface MdBulletList { kind: 'bullets'; items: string[] }
 interface MdBlockquote { kind: 'blockquote'; text: string }
+interface MdSeparator { kind: 'separator' }
 
-type MdElement = MdHeading | MdTable | MdBulletList | MdBlockquote;
+type MdElement = MdHeading | MdTable | MdBulletList | MdBlockquote | MdSeparator;
 
 function parseMarkdownStructure(source: string): MdElement[] {
   const lines = source.split('\n');
@@ -51,6 +53,13 @@ function parseMarkdownStructure(source: string): MdElement[] {
       i++;
       while (i < lines.length && !lines[i].trim().startsWith('```')) i++;
       if (i < lines.length) i++;
+      continue;
+    }
+
+    // Horizontal rule separator
+    if (trimmed === '---') {
+      elements.push({ kind: 'separator' });
+      i++;
       continue;
     }
 
@@ -173,6 +182,8 @@ interface MdStateEntry {
   onExit?: string;
   onDone?: string;
   timeout?: { duration: string; target: string };
+  invoke?: InvokeDef;
+  _pendingOnError?: string;
   ignoredEvents?: string[];
 }
 
@@ -198,7 +209,41 @@ function parseMdStateBullet(entry: MdStateEntry, text: string): void {
   } else if (text.startsWith('on_done:')) {
     let val = text.slice(8).trim();
     if (val.startsWith('->')) val = val.slice(2).trim();
+    if (entry.invoke) {
+      entry.invoke.onDone = val;
+    }
     entry.onDone = val;
+  } else if (text.startsWith('on_error:')) {
+    let val = text.slice(9).trim();
+    if (val.startsWith('->')) val = val.slice(2).trim();
+    if (entry.invoke) {
+      entry.invoke.onError = val;
+    } else {
+      entry._pendingOnError = val;
+    }
+  } else if (text.startsWith('invoke:')) {
+    const rest = text.slice(7).trim();
+    // Format: "MachineName" or "MachineName input: { field: ctx.field }"
+    const inputMatch = rest.match(/^(\w+)\s+input:\s*\{(.+)\}$/);
+    const pendingOnError = entry._pendingOnError;
+    delete entry._pendingOnError;
+    if (inputMatch) {
+      const machineName = inputMatch[1];
+      const inputStr = inputMatch[2];
+      const input: Record<string, string> = {};
+      const pairs = inputStr.split(',').map(p => p.trim());
+      for (const pair of pairs) {
+        const colonIdx = pair.indexOf(':');
+        if (colonIdx !== -1) {
+          const key = pair.slice(0, colonIdx).trim();
+          const val = pair.slice(colonIdx + 1).trim();
+          input[key] = val;
+        }
+      }
+      entry.invoke = { machine: machineName, input, onError: pendingOnError };
+    } else {
+      entry.invoke = { machine: rest, onError: pendingOnError };
+    }
   }
 }
 
@@ -227,6 +272,7 @@ function buildMdStatesAtLevel(
     if (entry.onExit) state.onExit = entry.onExit;
     if (entry.onDone) state.onDone = entry.onDone;
     if (entry.timeout) state.timeout = entry.timeout;
+    if (entry.invoke) state.invoke = entry.invoke;
 
     i++;
 
@@ -494,12 +540,7 @@ function parseMdActionSignature(name: string, text: string): ActionSignature {
   return { name, parameters, returnType, hasEffect, effectType };
 }
 
-/**
- * Parse Orca markdown (.orca.md) format into a MachineDef.
- */
-export function parseOrcaMd(source: string): MachineDef {
-  const elements = parseMarkdownStructure(source);
-
+function parseMachineFromElements(elements: MdElement[]): MachineDef {
   let machineName = 'unknown';
   const context: Record<string, unknown> = {};
   const events: string[] = [];
@@ -634,6 +675,63 @@ export function parseOrcaMd(source: string): MachineDef {
   const states = buildMdStatesAtLevel(stateEntries, 0, baseLevel).states;
 
   return { name: machineName, context, events, states, transitions, guards, actions };
+}
+
+/**
+ * Parse Orca markdown (.orca.md) format into a MachineDef.
+ * For multi-machine files, returns the first machine.
+ */
+export function parseOrcaMd(source: string): MachineDef {
+  const elements = parseMarkdownStructure(source);
+
+  // Split by separators for multi-machine files
+  const chunks: MdElement[][] = [];
+  let currentChunk: MdElement[] = [];
+
+  for (const el of elements) {
+    if (el.kind === 'separator') {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+      }
+    } else {
+      currentChunk.push(el);
+    }
+  }
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  // Parse first chunk as machine
+  return parseMachineFromElements(chunks[0] || []);
+}
+
+/**
+ * Parse Orca markdown (.orca.md) format into multiple MachineDefs.
+ * For single-machine files, returns an array with one machine.
+ */
+export function parseOrcaMdMulti(source: string): MachineDef[] {
+  const elements = parseMarkdownStructure(source);
+
+  // Split by separators for multi-machine files
+  const chunks: MdElement[][] = [];
+  let currentChunk: MdElement[] = [];
+
+  for (const el of elements) {
+    if (el.kind === 'separator') {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+      }
+    } else {
+      currentChunk.push(el);
+    }
+  }
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks.map(chunk => parseMachineFromElements(chunk));
 }
 
 /**

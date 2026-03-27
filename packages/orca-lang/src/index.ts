@@ -18,7 +18,7 @@ import {
 } from './auth/providers/minimax.js';
 import { parseMarkdown } from './parser/markdown-parser.js';
 import { machineToMarkdown } from './parser/ast-to-markdown.js';
-import { checkStructural } from './verifier/structural.js';
+import { checkStructural, analyzeFile } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
 import { checkProperties } from './verifier/properties.js';
@@ -41,7 +41,11 @@ import type { MachineDef } from './parser/ast.js';
 
 /** Parse an Orca machine definition file (markdown format) */
 function parseFile(filePath: string, source: string): MachineDef {
-  return parseMarkdown(source).machine;
+  const { file } = parseMarkdown(source);
+  if (file.machines.length > 1) {
+    throw new Error(`File ${filePath} contains multiple machines. Use a command that supports multi-machine files.`);
+  }
+  return file.machines[0];
 }
 
 async function login(provider: string, profileId: string = 'default'): Promise<void> {
@@ -167,8 +171,33 @@ async function verify(filePath: string, json: boolean = false): Promise<void> {
 
   console.log(`Verifying ${filePath}...`);
   const source = readFileSync(filePath, 'utf-8');
-  const machine = parseFile(filePath, source);
+  const { file } = parseMarkdown(source);
 
+  if (file.machines.length > 1) {
+    // Multi-machine verification
+    const fileAnalysis = analyzeFile(file);
+    console.log(`Parsed ${file.machines.length} machines:`);
+    for (const machine of file.machines) {
+      console.log(`  - ${machine.name}`);
+    }
+
+    const allErrors = [...fileAnalysis.errors];
+    const allWarnings = [...fileAnalysis.warnings];
+
+    if (allErrors.length > 0) {
+      const errorCount = allErrors.filter(e => e.severity === 'error').length;
+      const warningCount = allErrors.filter(e => e.severity === 'warning').length + allWarnings.length;
+      console.log(`\nFound ${errorCount} error(s)${warningCount > 0 ? ` and ${warningCount} warning(s)` : ''}:`);
+      formatErrors([...allErrors, ...allWarnings]);
+      process.exit(1);
+    } else {
+      console.log('\nVerification passed!');
+    }
+    return;
+  }
+
+  // Single-machine verification
+  const machine = file.machines[0];
   console.log(`Parsed machine: ${machine.name}`);
   console.log(`  States: ${machine.states.length}`);
   console.log(`  Events: ${machine.events.length}`);
@@ -213,7 +242,11 @@ async function compileXState(filePath: string, json: boolean = false): Promise<v
     return;
   }
   const source = readFileSync(filePath, 'utf-8');
-  const machine = parseFile(filePath, source);
+  const { file } = parseMarkdown(source);
+  if (file.machines.length > 1) {
+    console.error('Multi-machine XState compilation not yet fully implemented. Compiling first machine only.');
+  }
+  const machine = file.machines[0];
   const output = compileToXState(machine);
   console.log(output);
 }
@@ -491,7 +524,7 @@ async function main(): Promise<void> {
       writeFileSync(outputPath, md);
       console.log(`Converted: ${inputPath} -> ${outputPath}`);
       // Verify round-trip
-      const roundTrip = parseMarkdown(md).machine;
+      const roundTrip = parseMarkdown(md).file.machines[0];
       console.log(`Round-trip verification: ${JSON.stringify(machine) === JSON.stringify(roundTrip) ? 'PASS' : 'WARN: ASTs differ'}`);
     } else if (command === 'actions') {
       let lang = 'typescript';

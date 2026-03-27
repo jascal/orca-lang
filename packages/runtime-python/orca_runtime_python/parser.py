@@ -29,6 +29,7 @@ from .types import (
     ValueRef,
     RegionDef,
     ParallelDef,
+    InvokeDef,
 )
 
 
@@ -67,7 +68,13 @@ class _MdBlockquote:
     text: str = ""
 
 
-_MdElement = _MdHeading | _MdTable | _MdBulletList | _MdBlockquote
+@dataclass
+class _MdSeparator:
+    """Machine separator (--- between machines in multi-machine files)."""
+    kind: str = "separator"
+
+
+_MdElement = _MdHeading | _MdTable | _MdBulletList | _MdBlockquote | _MdSeparator
 
 
 def _parse_markdown_structure(source: str) -> list[_MdElement]:
@@ -98,6 +105,12 @@ def _parse_markdown_structure(source: str) -> list[_MdElement]:
                 level=len(heading_match.group(1)),
                 text=heading_match.group(2).strip(),
             ))
+            i += 1
+            continue
+
+        # Separator between machines (--- on its own line)
+        if re.match(r"^---+$", trimmed):
+            elements.append(_MdSeparator())
             i += 1
             continue
 
@@ -203,6 +216,8 @@ class _MdStateEntry:
     on_done: str | None = None
     timeout: dict[str, str] | None = None
     ignored_events: list[str] = field(default_factory=list)
+    invoke: InvokeDef | None = None
+    _pending_on_error: str | None = None  # temp: on_error parsed before invoke
 
 
 def _parse_md_state_bullet(entry: _MdStateEntry, text: str) -> None:
@@ -233,6 +248,37 @@ def _parse_md_state_bullet(entry: _MdStateEntry, text: str) -> None:
         if val.startswith("->"):
             val = val[2:].strip()
         entry.on_done = val
+        # Also set on_done on invoke if invoke exists
+        if entry.invoke:
+            entry.invoke.on_done = val
+    elif text.startswith("on_error:"):
+        val = text[9:].strip()
+        if val.startswith("->"):
+            val = val[2:].strip()
+        # Store temporarily until invoke is parsed
+        entry._pending_on_error = val
+        if entry.invoke:
+            entry.invoke.on_error = val
+    elif text.startswith("invoke:"):
+        rest = text[7:].strip()  # "MachineName" or "MachineName input: { ... }"
+        machine_name = rest
+        input_map: dict[str, str] | None = None
+
+        # Check for input mapping
+        input_match = re.search(r"input:\s*\{([^}]+)\}", rest)
+        if input_match:
+            machine_name = rest[:input_match.start()].strip()
+            input_str = input_match.group(1)
+            input_map = {}
+            for pair in input_str.split(","):
+                if ":" in pair:
+                    key, value = pair.split(":", 1)
+                    input_map[key.strip()] = value.strip()
+
+        entry.invoke = InvokeDef(machine=machine_name, input=input_map)
+        # Apply pending on_error if we already parsed it
+        if entry._pending_on_error:
+            entry.invoke.on_error = entry._pending_on_error
 
 
 def _build_md_states_at_level(
@@ -271,6 +317,8 @@ def _build_md_states_at_level(
             state.timeout = entry.timeout
         if entry.ignored_events:
             state.ignored_events = list(entry.ignored_events)
+        if entry.invoke:
+            state.invoke = entry.invoke
 
         i += 1
 
@@ -597,12 +645,8 @@ def _map_op(op: str) -> str:
     }.get(op, "eq")
 
 
-def parse_orca_md(source: str) -> MachineDef:
-    """
-    Parse Orca markdown (.orca.md) format into a MachineDef.
-    """
-    elements = _parse_markdown_structure(source)
-
+def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
+    """Parse a single machine from already-split elements."""
     machine_name = "unknown"
     context: dict[str, Any] = {}
     events: list[str] = []
@@ -760,6 +804,60 @@ def parse_orca_md(source: str) -> MachineDef:
         guards=guards,
         actions=actions,
     )
+
+
+def parse_orca_md(source: str) -> MachineDef:
+    """
+    Parse Orca markdown (.orca.md) format into a MachineDef.
+    For multi-machine files, returns the first machine.
+    """
+    elements = _parse_markdown_structure(source)
+
+    # Check for separators (multi-machine file)
+    has_separators = any(isinstance(el, _MdSeparator) for el in elements)
+    if has_separators:
+        # Split by separators and parse the first machine
+        chunks: list[list[_MdElement]] = []
+        current_chunk: list[_MdElement] = []
+        for el in elements:
+            if isinstance(el, _MdSeparator):
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = []
+            else:
+                current_chunk.append(el)
+        if current_chunk:
+            chunks.append(current_chunk)
+        return _parse_machine_elements(chunks[0]) if chunks else _parse_machine_elements(elements)
+
+    return _parse_machine_elements(elements)
+
+
+def parse_orca_md_multi(source: str) -> list[MachineDef]:
+    """
+    Parse Orca markdown (.orca.md) format into multiple MachineDefs.
+    For single-machine files, returns a list with one element.
+    """
+    elements = _parse_markdown_structure(source)
+
+    # Check for separators (multi-machine file)
+    has_separators = any(isinstance(el, _MdSeparator) for el in elements)
+    if has_separators:
+        # Split by separators
+        chunks: list[list[_MdElement]] = []
+        current_chunk: list[_MdElement] = []
+        for el in elements:
+            if isinstance(el, _MdSeparator):
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = []
+            else:
+                current_chunk.append(el)
+        if current_chunk:
+            chunks.append(current_chunk)
+        return [_parse_machine_elements(chunk) for chunk in chunks]
+
+    return [_parse_machine_elements(elements)]
 
 
 def parse_orca_auto(source: str, filename: str | None = None) -> MachineDef:

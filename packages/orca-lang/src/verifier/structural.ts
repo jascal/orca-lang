@@ -1,5 +1,5 @@
-import { MachineDef, StateDef } from '../parser/ast.js';
-import type { VerificationError, VerificationResult, StateInfo, MachineAnalysis } from './types.js';
+import { MachineDef, StateDef, OrcaFile } from '../parser/ast.js';
+import type { VerificationError, VerificationResult, StateInfo, MachineAnalysis, FileAnalysis } from './types.js';
 
 export type { Severity } from './types.js';
 export type { VerificationError, VerificationResult, StateInfo, MachineAnalysis } from './types.js';
@@ -408,4 +408,362 @@ export function checkStructural(machine: MachineDef): VerificationResult {
     valid: errors.filter(e => e.severity === 'error').length === 0,
     errors,
   };
+}
+
+// ============================================================
+// Cross-Machine Analysis (for multi-machine files)
+// ============================================================
+
+const MAX_TOTAL_STATES = 64;
+
+/**
+ * Build a map of machine name -> list of machines it invokes
+ */
+function buildInvocationGraph(file: OrcaFile): Map<string, string[]> {
+  const graph = new Map<string, string[]>();
+
+  for (const machine of file.machines) {
+    const invoked: string[] = [];
+    collectInvocations(machine.states, invoked);
+    graph.set(machine.name, invoked);
+  }
+
+  return graph;
+}
+
+function collectInvocations(states: StateDef[], result: string[]): void {
+  for (const state of states) {
+    if (state.invoke) {
+      result.push(state.invoke.machine);
+    }
+    if (state.contains) {
+      collectInvocations(state.contains, result);
+    }
+    if (state.parallel) {
+      for (const region of state.parallel.regions) {
+        collectInvocations(region.states, result);
+      }
+    }
+  }
+}
+
+/**
+ * Detect cycles in the invocation graph using DFS.
+ * Returns an array of machine names forming a cycle, or empty if no cycle.
+ */
+function detectCycle(graph: Map<string, string[]>, machine: string, visited: Set<string>, path: string[]): string[] {
+  visited.add(machine);
+  path.push(machine);
+
+  const invoked = graph.get(machine) || [];
+  for (const child of invoked) {
+    if (path.includes(child)) {
+      // Found cycle - return the cycle starting from the child
+      const cycleStart = path.indexOf(child);
+      return [...path.slice(cycleStart), child];
+    }
+    if (!visited.has(child)) {
+      const cycle = detectCycle(graph, child, visited, [...path]);
+      if (cycle.length > 0) return cycle;
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Check that a machine can reach a final state.
+ */
+function canReachFinalState(machine: MachineDef, visited: Set<string> = new Set()): boolean {
+  if (visited.has(machine.name)) return false;  // Prevent infinite recursion
+  visited.add(machine.name);
+
+  // Check if machine has any final states
+  const finalStateNames = new Set<string>();
+  collectFinalStates(machine.states, finalStateNames);
+
+  if (finalStateNames.size === 0) return false;
+
+  // Build transition map for reachability check
+  const transitionMap = new Map<string, Set<string>>();
+  for (const t of machine.transitions) {
+    if (!transitionMap.has(t.source)) {
+      transitionMap.set(t.source, new Set());
+    }
+    transitionMap.get(t.source)!.add(t.target);
+  }
+
+  // BFS from initial state to see if we can reach any final state
+  const initialState = machine.states.find(s => s.isInitial);
+  if (!initialState) return false;
+
+  const queue = [initialState.name];
+  const seen = new Set<string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (seen.has(current)) continue;
+    seen.add(current);
+
+    if (finalStateNames.has(current)) return true;
+
+    const targets = transitionMap.get(current);
+    if (targets) {
+      for (const target of targets) {
+        if (!seen.has(target)) {
+          queue.push(target);
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function collectFinalStates(states: StateDef[], result: Set<string>): void {
+  for (const state of states) {
+    if (state.isFinal) {
+      result.add(state.name);
+    }
+    if (state.contains) {
+      collectFinalStates(state.contains, result);
+    }
+    if (state.parallel) {
+      for (const region of state.parallel.regions) {
+        collectFinalStates(region.states, result);
+      }
+    }
+  }
+}
+
+/**
+ * Validate input field mappings - fields must exist in parent context
+ */
+function validateInputMappings(
+  file: OrcaFile,
+  machineMap: Map<string, MachineDef>,
+  errors: VerificationError[],
+  warnings: VerificationError[]
+): void {
+  for (const machine of file.machines) {
+    const contextFields = new Set(machine.context.map(c => c.name));
+
+    // Also check for ctx.field references in transitions that might give us field names
+    for (const t of machine.transitions) {
+      if (t.guard) {
+        // Guard references might use context fields
+        // For now we just validate explicit input mappings
+      }
+    }
+
+    // Check invoke input mappings
+    validateInvokeInputs(machine.states, machine.name, contextFields, errors, warnings);
+  }
+}
+
+function validateInvokeInputs(
+  states: StateDef[],
+  machineName: string,
+  contextFields: Set<string>,
+  errors: VerificationError[],
+  warnings: VerificationError[]
+): void {
+  for (const state of states) {
+    if (state.invoke?.input) {
+      for (const [childField, parentField] of Object.entries(state.invoke.input)) {
+        // parentField is like "ctx.order_id" or just "order_id"
+        const fieldName = parentField.replace(/^ctx\./, '');
+        if (!contextFields.has(fieldName)) {
+          errors.push({
+            code: 'INVALID_INPUT_MAPPING',
+            message: `Machine '${machineName}' state '${state.name}': input mapping references '${fieldName}' which does not exist in context`,
+            severity: 'error',
+            location: { state: state.name },
+            suggestion: `Add '${fieldName}' to the context declaration or use an existing field`,
+          });
+        }
+      }
+    }
+    if (state.contains) {
+      validateInvokeInputs(state.contains, machineName, contextFields, errors, warnings);
+    }
+    if (state.parallel) {
+      for (const region of state.parallel.regions) {
+        validateInvokeInputs(region.states, machineName, contextFields, errors, warnings);
+      }
+    }
+  }
+}
+
+/**
+ * Analyze an entire OrcaFile with multiple machines.
+ * Performs cross-machine validation including:
+ * - Machine resolution (invoke.machine must exist)
+ * - Circular invocation detection
+ * - Child reachability to final state
+ * - onDone/onError event validation
+ * - Missing on_error warning
+ * - Combined state budget
+ * - Input field validation
+ */
+export function analyzeFile(file: OrcaFile): FileAnalysis {
+  const errors: VerificationError[] = [];
+  const warnings: VerificationError[] = [];
+
+  const machineMap = new Map<string, MachineDef>();
+  for (const machine of file.machines) {
+    machineMap.set(machine.name, machine);
+  }
+
+  // Build invocation graph
+  const invocationGraph = buildInvocationGraph(file);
+
+  // Check total state count
+  let totalStates = 0;
+  for (const machine of file.machines) {
+    const stateCount = countStates(machine.states);
+    totalStates += stateCount;
+  }
+
+  if (totalStates > MAX_TOTAL_STATES) {
+    errors.push({
+      code: 'STATE_LIMIT_EXCEEDED',
+      message: `Combined state count (${totalStates}) exceeds limit of ${MAX_TOTAL_STATES}`,
+      severity: 'error',
+      suggestion: 'Split machines into separate files or reduce state count',
+    });
+  }
+
+  // Analyze each machine
+  const analyses = new Map<string, MachineAnalysis>();
+  for (const machine of file.machines) {
+    analyses.set(machine.name, analyzeMachine(machine));
+  }
+
+  // Check for cycles
+  const visited = new Set<string>();
+  for (const machine of file.machines) {
+    if (!visited.has(machine.name)) {
+      const cycle = detectCycle(invocationGraph, machine.name, visited, []);
+      if (cycle.length > 0) {
+        errors.push({
+          code: 'CIRCULAR_INVOCATION',
+          message: `Circular invocation detected: ${cycle.join(' -> ')}`,
+          severity: 'error',
+          suggestion: 'Remove the circular invocation chain',
+        });
+      }
+    }
+  }
+
+  // Check each invoke
+  for (const machine of file.machines) {
+    const eventNames = new Set(machine.events.map(e => e.name));
+    checkInvocations(machine.states, machine.name, machineMap, eventNames, errors, warnings);
+  }
+
+  // Validate input mappings
+  validateInputMappings(file, machineMap, errors, warnings);
+
+  return {
+    machines: analyses,
+    invocationGraph,
+    errors,
+    warnings,
+  };
+}
+
+function checkInvocations(
+  states: StateDef[],
+  machineName: string,
+  machineMap: Map<string, MachineDef>,
+  eventNames: Set<string>,
+  errors: VerificationError[],
+  warnings: VerificationError[]
+): void {
+  for (const state of states) {
+    if (state.invoke) {
+      const invokedMachine = state.invoke.machine;
+
+      // Check machine exists
+      if (!machineMap.has(invokedMachine)) {
+        errors.push({
+          code: 'UNKNOWN_MACHINE',
+          message: `Machine '${machineName}' state '${state.name}': invokes unknown machine '${invokedMachine}'`,
+          severity: 'error',
+          location: { state: state.name },
+          suggestion: `Define a machine named '${invokedMachine}' in the same file`,
+        });
+      } else {
+        // Check child can reach final state
+        const childMachine = machineMap.get(invokedMachine)!;
+        if (!canReachFinalState(childMachine)) {
+          errors.push({
+            code: 'CHILD_NO_FINAL_STATE',
+            message: `Machine '${machineName}' state '${state.name}': invoked machine '${invokedMachine}' has no reachable final state`,
+            severity: 'error',
+            location: { state: state.name },
+            suggestion: `Add at least one final state to '${invokedMachine}'`,
+          });
+        }
+      }
+
+      // Check onDone event exists in parent's events
+      if (state.invoke.onDone && !eventNames.has(state.invoke.onDone)) {
+        errors.push({
+          code: 'UNKNOWN_ON_DONE_EVENT',
+          message: `Machine '${machineName}' state '${state.name}': on_done references event '${state.invoke.onDone}' which is not declared`,
+          severity: 'error',
+          location: { state: state.name },
+          suggestion: `Add '${state.invoke.onDone}' to the events declaration`,
+        });
+      }
+
+      // Check onError event exists in parent's events
+      if (state.invoke.onError && !eventNames.has(state.invoke.onError)) {
+        errors.push({
+          code: 'UNKNOWN_ON_ERROR_EVENT',
+          message: `Machine '${machineName}' state '${state.name}': on_error references event '${state.invoke.onError}' which is not declared`,
+          severity: 'error',
+          location: { state: state.name },
+          suggestion: `Add '${state.invoke.onError}' to the events declaration`,
+        });
+      }
+
+      // Warn if no onError (potential deadlock on child error)
+      if (!state.invoke.onError) {
+        warnings.push({
+          code: 'MISSING_ON_ERROR',
+          message: `Machine '${machineName}' state '${state.name}': invoke has no on_error handler - child errors will cause deadlock`,
+          severity: 'warning',
+          location: { state: state.name },
+          suggestion: `Add on_error: EVENT to handle child machine failures`,
+        });
+      }
+    }
+
+    if (state.contains) {
+      checkInvocations(state.contains, machineName, machineMap, eventNames, errors, warnings);
+    }
+    if (state.parallel) {
+      for (const region of state.parallel.regions) {
+        checkInvocations(region.states, machineName, machineMap, eventNames, errors, warnings);
+      }
+    }
+  }
+}
+
+function countStates(states: StateDef[]): number {
+  let count = states.length;
+  for (const state of states) {
+    if (state.contains) {
+      count += countStates(state.contains);
+    }
+    if (state.parallel) {
+      for (const region of state.parallel.regions) {
+        count += countStates(region.states);
+      }
+    }
+  }
+  return count;
 }

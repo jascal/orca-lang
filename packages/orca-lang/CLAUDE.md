@@ -87,7 +87,6 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
-- **src/parser/lexer.ts** - Tokenizer for `.orca.md` markdown format; keywords become TokenType enums
 - **src/parser/markdown-parser.ts** - Two-phase markdown parser for `.orca.md` format (structural → semantic); produces AST
 - **src/parser/ast-to-markdown.ts** - AST-to-markdown converter for `orca convert` command
 - **src/verifier/structural.ts** - Reachability, deadlock, orphan detection; `analyzeMachine()` builds the `MachineAnalysis` object
@@ -117,8 +116,9 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 2.8 | ✅ Complete | Two demos: `orca-demo-ts` (text adventure) and `orca-demo-python` (agent framework) |
 | Phase 3 | ✅ Complete | Hierarchical states, parallel regions, property specification & guard-aware bounded model checking, snapshot/restore |
 | Phase 3.5 | ✅ Complete | Markdown syntax migration — `.orca.md` format with tables, headers, and lists for LLM-native generation |
-| Phase 4 | ⏳ Not started | Additional compilation targets — Go is next priority (TypeScript and Python runtimes already exist) |
-| Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-machine composition) |
+| Phase 4 | ✅ Complete | Machine invocation — `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, cross-machine verifier (cycle detection, child reachability, machine resolution), XState invoke config (`__machine__:Name`), runtime-ts child lifecycle (start on entry, stop on exit, completion events, snapshot/restore), runtime-python port, CLI verify/compile working |
+| Phase 4.5 | ⏳ Not started | Go runtime + ride-hailing demo — `runtime-go` to feature parity including invocation, then 5-machine trip coordinator demo in Go ([demo design](../../docs/demo-ride-hailing.md)) |
+| Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-file imports) |
 | Phase 6 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
 
 **Phase 2.7 detail — what's implemented:**
@@ -144,6 +144,27 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - ✅ Runtime-python markdown parser (`parse_orca_md`, `parse_orca_auto`) — full parallel/hierarchical support, 8 tests
 - ✅ Skill prompts (`/generate-orca`, `/refine-orca`) updated to produce markdown format
 - ✅ Legacy DSL parser retained for backward compatibility with existing `.orca` files
+
+**Phase 4 detail — Machine Invocation (complete):**
+- Design: `docs/machine-invocation-design.md`
+- ✅ AST + parser — `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, `- invoke:` / `- on_done:` / `- on_error:` bullets
+- ✅ Verifier — cross-machine analysis: machine resolution, circular invocation detection, child reachability to final state
+- ✅ XState compiler — `__machine__:Name` src convention, onDone/onError targets
+- ✅ Runtime-ts — child machine lifecycle (start on entry, stop on exit), completion events, snapshot/restore with children
+- ✅ Runtime-python — ported from runtime-ts, same lifecycle/cancellation/snapshot semantics
+- Key decisions: parent owns child lifecycle (forced stop), input-only context isolation, no recursive invocations, one invoke per state, concurrent invocations via parallel regions
+
+**Phase 4.5 plan — Go Runtime + Ride-Hailing Demo (not started):**
+- Design: `docs/demo-ride-hailing.md` — 5-machine trip coordinator demo
+- Step A1: Core Go runtime — markdown parser (`ParseOrcaMd`, `ParseOrcaAuto`), `OrcaMachine` struct, basic state transitions, context. Zero external dependencies.
+- Step A2: Guards + actions — guard evaluation for complex expressions, action registration via `RegisterAction()`
+- Step A3: Event bus — pub/sub, request/response, effect handler registration
+- Step A4: Timeouts — goroutines with `context.Context` cancellation, auto-cancel on state exit/stop
+- Step A5: Hierarchical states + parallel regions — nested states, multi-region state values, sync strategies
+- Step A6: Snapshot/restore — deep-copy state + context, timeout cancellation/restart
+- Step A7: Machine invocation — child lifecycle, input mapping, completion events, forced cancellation, snapshot with children
+- Step B1-B6: Ride-hailing demo — incremental build from 2 machines to 5, interactive CLI with failure mode flags
+- Target: runtime-go at feature parity with runtime-ts/runtime-python, plus the first multi-machine demo
 
 ### Skills (LLM-friendly CLI commands)
 

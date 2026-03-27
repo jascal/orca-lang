@@ -1,12 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseMarkdown } from '../src/parser/markdown-parser.js';
+import { parseMachine } from '../src/parser/markdown-parser.js';
 import { checkProperties } from '../src/verifier/properties.js';
 import { MachineDef, Property } from '../src/parser/ast.js';
-
-// Helper to parse a markdown source and return the machine
-function parseMachine(source: string): MachineDef {
-  return parseMarkdown(source).machine;
-}
 
 // Minimal valid machine for property testing
 const baseMachine = `# machine TestMachine

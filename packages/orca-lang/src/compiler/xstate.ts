@@ -184,6 +184,11 @@ function buildStateConfig(state: StateDef, machine: MachineDef, allStates: State
     config.exit = state.onExit;
   }
 
+  // Handle machine invocation
+  if (state.invoke) {
+    config.invoke = buildMachineInvoke(state.invoke);
+  }
+
   // Handle transitions - only use this state's transitions
   // (transitions on compound states fire from any child via XState's event bubbling)
   const thisStateTransitions = machine.transitions.filter(t => t.source === state.name);
@@ -290,6 +295,37 @@ function buildEffectInvoke(actionName: string, action: ActionSignature, machine:
 
   if (errorTarget) {
     invokeConfig.onError.target = errorTarget;
+  }
+
+  return invokeConfig;
+}
+
+function buildMachineInvoke(invokeDef: { machine: string; input?: Record<string, string>; onDone?: string; onError?: string }): any {
+  // Build input expression from input mapping
+  // input is like { id: "ctx.order_id" } -> { id: context.order_id }
+  const inputExpr = ({ context, event }: { context: any; event: any }) => {
+    const input: Record<string, unknown> = {};
+    if (invokeDef.input) {
+      for (const [key, value] of Object.entries(invokeDef.input)) {
+        // value is like "ctx.order_id" - extract the field name
+        const fieldName = value.replace(/^ctx\./, '');
+        input[key] = context[fieldName];
+      }
+    }
+    return input;
+  };
+
+  const invokeConfig: any = {
+    src: `__machine__:${invokeDef.machine}`,
+    input: inputExpr,
+  };
+
+  if (invokeDef.onDone) {
+    invokeConfig.onDone = { target: invokeDef.onDone };
+  }
+
+  if (invokeDef.onError) {
+    invokeConfig.onError = { target: invokeDef.onError };
   }
 
   return invokeConfig;
@@ -448,6 +484,28 @@ export function compileToXState(machine: MachineDef): string {
     }
     if (state.onExit) {
       lines.push(`      exit: '${state.onExit}',`);
+    }
+
+    // Handle machine invocation
+    if (state.invoke) {
+      lines.push(`      invoke: {`);
+      lines.push(`        src: '__machine__:${state.invoke.machine}',`);
+      if (state.invoke.input) {
+        // Build input mapping expression
+        const inputPairs: string[] = [];
+        for (const [key, value] of Object.entries(state.invoke.input)) {
+          const fieldName = value.replace(/^ctx\./, '');
+          inputPairs.push(`${key}: context.${fieldName}`);
+        }
+        lines.push(`        input: ({ context }) => ({ ${inputPairs.join(', ')} }),`);
+      }
+      if (state.invoke.onDone) {
+        lines.push(`        onDone: { target: '${state.invoke.onDone}' },`);
+      }
+      if (state.invoke.onError) {
+        lines.push(`        onError: { target: '${state.invoke.onError}' },`);
+      }
+      lines.push(`      },`);
     }
 
     // Collect transitions for this state

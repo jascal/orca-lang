@@ -3,12 +3,12 @@
 // Produces identical MachineDef AST as the DSL parser
 
 import {
-  ParseResult, MachineDef, ContextField, EventDef, StateDef,
+  ParseResult, MachineDef, OrcaFile, ContextField, EventDef, StateDef,
   Transition, GuardDef, GuardExpression, ActionSignature,
   ParallelDef, RegionDef, SyncStrategy, Property, Type,
   GuardRef, VariableRef, ValueRef, ComparisonOp,
   ReachabilityProperty, PassesThroughProperty, RespondsProperty,
-  InvariantProperty,
+  InvariantProperty, InvokeDef,
 } from './ast.js';
 
 // ============================================================
@@ -20,8 +20,9 @@ interface MdTable { kind: 'table'; headers: string[]; rows: string[][]; line: nu
 interface MdBulletList { kind: 'bullets'; items: string[]; line: number }
 interface MdBlockquote { kind: 'blockquote'; text: string; line: number }
 interface MdParagraph { kind: 'paragraph'; text: string; line: number }
+interface MdSeparator { kind: 'separator'; line: number }
 
-type MdElement = MdHeading | MdTable | MdBulletList | MdBlockquote | MdParagraph;
+type MdElement = MdHeading | MdTable | MdBulletList | MdBlockquote | MdParagraph | MdSeparator;
 
 function parseMarkdownStructure(source: string): MdElement[] {
   const lines = source.split('\n');
@@ -38,6 +39,13 @@ function parseMarkdownStructure(source: string): MdElement[] {
       i++;
       while (i < lines.length && !lines[i].trim().startsWith('```')) i++;
       if (i < lines.length) i++;
+      continue;
+    }
+
+    // Horizontal rule separator (--- between machines)
+    if (trimmed === '---') {
+      elements.push({ kind: 'separator', line: i + 1 });
+      i++;
       continue;
     }
 
@@ -378,6 +386,8 @@ interface StateEntry {
   onExit?: string;
   onDone?: string;
   timeout?: { duration: string; target: string };
+  invoke?: InvokeDef;
+  _pendingOnError?: string;  // temp: on_error parsed before invoke
   ignoredEvents?: string[];
   line: number;
 }
@@ -425,7 +435,43 @@ function parseStateBullet(entry: StateEntry, text: string): void {
   } else if (text.startsWith('on_done:')) {
     let val = text.slice(8).trim();
     if (val.startsWith('->')) val = val.slice(2).trim();
+    if (entry.invoke) {
+      entry.invoke.onDone = val;
+    }
+    // Also set entry.onDone for non-invoke states (like parallel sync on_done)
     entry.onDone = val;
+  } else if (text.startsWith('on_error:')) {
+    let val = text.slice(9).trim();
+    if (val.startsWith('->')) val = val.slice(2).trim();
+    if (entry.invoke) {
+      entry.invoke.onError = val;
+    } else {
+      entry._pendingOnError = val;
+    }
+  } else if (text.startsWith('invoke:')) {
+    const rest = text.slice(7).trim();
+    // Format: "MachineName" or "MachineName input: { field: ctx.field }"
+    const inputMatch = rest.match(/^(\w+)\s+input:\s*\{(.+)\}$/);
+    const pendingOnError = entry._pendingOnError;
+    delete entry._pendingOnError;
+    if (inputMatch) {
+      const machineName = inputMatch[1];
+      const inputStr = inputMatch[2];
+      const input: Record<string, string> = {};
+      // Parse { field: ctx.field } into { field: "ctx.field" }
+      const pairs = inputStr.split(',').map(p => p.trim());
+      for (const pair of pairs) {
+        const colonIdx = pair.indexOf(':');
+        if (colonIdx !== -1) {
+          const key = pair.slice(0, colonIdx).trim();
+          const val = pair.slice(colonIdx + 1).trim();
+          input[key] = val;
+        }
+      }
+      entry.invoke = { machine: machineName, input, onError: pendingOnError };
+    } else {
+      entry.invoke = { machine: rest, onError: pendingOnError };
+    }
   }
 }
 
@@ -572,6 +618,7 @@ function buildStatesAtLevel(
     if (entry.onDone) state.onDone = entry.onDone;
     if (entry.timeout) state.timeout = entry.timeout;
     if (entry.ignoredEvents?.length) state.ignoredEvents = entry.ignoredEvents;
+    if (entry.invoke) state.invoke = entry.invoke;
 
     i++;
 
@@ -616,8 +663,10 @@ function buildParallelRegions(
         if (e.description) s.description = e.description;
         if (e.onEntry) s.onEntry = e.onEntry;
         if (e.onExit) s.onExit = e.onExit;
+        if (e.onDone) s.onDone = e.onDone;
         if (e.timeout) s.timeout = e.timeout;
         if (e.ignoredEvents?.length) s.ignoredEvents = e.ignoredEvents;
+        if (e.invoke) s.invoke = e.invoke;
         regionStates.push(s);
         i++;
       } else {
@@ -633,7 +682,7 @@ function buildParallelRegions(
 
 // --- Main Semantic Parser ---
 
-function parseMarkdownSemantic(elements: MdElement[]): MachineDef {
+function parseMachineFromElements(elements: MdElement[]): MachineDef {
   let machineName = '';
   let context: ContextField[] = [];
   let events: EventDef[] = [];
@@ -723,6 +772,29 @@ function parseMarkdownSemantic(elements: MdElement[]): MachineDef {
   return machine;
 }
 
+function parseMarkdownSemantic(elements: MdElement[]): MachineDef[] {
+  // Split elements by --- separators for multi-machine files
+  const chunks: MdElement[][] = [];
+  let currentChunk: MdElement[] = [];
+
+  for (const el of elements) {
+    if (el.kind === 'separator') {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk);
+        currentChunk = [];
+      }
+    } else {
+      currentChunk.push(el);
+    }
+  }
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  // Parse each chunk as a separate machine
+  return chunks.map(chunk => parseMachineFromElements(chunk));
+}
+
 function parsePropertiesList(list: MdBulletList): Property[] {
   return list.items.map(parsePropertyFromBullet);
 }
@@ -733,6 +805,15 @@ function parsePropertiesList(list: MdBulletList): Property[] {
 
 export function parseMarkdown(source: string): ParseResult {
   const elements = parseMarkdownStructure(source);
-  const machine = parseMarkdownSemantic(elements);
-  return { machine, tokens: [] };
+  const machines = parseMarkdownSemantic(elements);
+  return { file: { machines }, tokens: [] };
+}
+
+/**
+ * Parse a single-machine markdown source. For multi-machine files, returns the first machine.
+ * @deprecated Use parseMarkdown() and access result.file.machines[0] for explicit handling
+ */
+export function parseMachine(source: string): MachineDef {
+  const { file } = parseMarkdown(source);
+  return file.machines[0];
 }

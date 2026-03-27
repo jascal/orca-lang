@@ -93,6 +93,13 @@ export interface ParallelDef {
   sync?: SyncStrategy;  // default: 'all-final'
 }
 
+export interface InvokeDef {
+  machine: string;                    // Name of machine to invoke
+  input?: Record<string, string>;     // Optional: ctx.field -> child param mapping
+  onDone?: string;                    // Event to emit when child completes
+  onError?: string;                   // Event to emit when child errors
+}
+
 export interface StateDef {
   name: string;
   description?: string;
@@ -105,6 +112,7 @@ export interface StateDef {
     duration: string;
     target: string;
   };
+  invoke?: InvokeDef;     // machine invocation (mutually exclusive with contains/parallel)
   contains?: StateDef[];
   parallel?: ParallelDef;  // mutually exclusive with contains
   parent?: string;  // Parent state name for hierarchical states
@@ -210,7 +218,12 @@ export interface MachineDef {
   properties?: Property[];
 }
 
+// Multi-machine file (for machine invocation)
+export interface OrcaFile {
+  machines: MachineDef[];
+}
+
 export interface ParseResult {
-  machine: MachineDef;
+  file: OrcaFile;
   tokens: Token[];
 }

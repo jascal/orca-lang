@@ -31,6 +31,7 @@ from .types import (
     GuardNullcheck,
     VariableRef,
     ValueRef,
+    InvokeDef,
 )
 from .bus import EventBus, Event, EventType, get_event_bus
 
@@ -91,6 +92,11 @@ class OrcaMachine:
         self._action_handlers: dict[str, ActionHandler] = {}
         self._timeout_task: asyncio.Task | None = None
 
+        # Child machine management
+        self._child_machines: dict[str, OrcaMachine] = {}
+        self._sibling_machines: dict[str, MachineDef] | None = None
+        self._active_invoke: str | None = None
+
     def _get_initial_state(self) -> str:
         """Find the initial state name."""
         for state in self.definition.states:
@@ -115,6 +121,7 @@ class OrcaMachine:
         """
         Capture the current machine state as a serializable snapshot.
         The snapshot includes state value, context, and timestamp.
+        Child machine snapshots are included.
         Action handlers are NOT included — re-register them after restore.
         """
         import copy
@@ -123,6 +130,8 @@ class OrcaMachine:
         return {
             "state": copy.deepcopy(state_val),
             "context": copy.deepcopy(self.context),
+            "children": {k: m.snapshot() for k, m in self._child_machines.items()},
+            "active_invoke": self._active_invoke,
             "timestamp": time.time(),
         }
 
@@ -143,6 +152,66 @@ class OrcaMachine:
         if self._active:
             for leaf in self._state.leaves():
                 self._start_timeout_for_state(leaf)
+
+    def register_machines(self, machines: dict[str, MachineDef]) -> None:
+        """Register sibling machines for invocation."""
+        self._sibling_machines = machines
+
+    async def start_child_machine(self, state_name: str, invoke_def: InvokeDef) -> None:
+        """Start a child machine as part of an invoke state."""
+        if self._sibling_machines is None:
+            return
+        if invoke_def.machine not in self._sibling_machines:
+            return
+
+        child_def = self._sibling_machines[invoke_def.machine]
+
+        # Map input from parent context
+        child_context = dict(child_def.context)
+        if invoke_def.input:
+            for key, value in invoke_def.input.items():
+                field_name = value.replace("ctx.", "")
+                child_context[key] = self.context.get(field_name)
+
+        # Create child machine
+        child = OrcaMachine(
+            definition=child_def,
+            event_bus=self.event_bus,
+            context=child_context,
+        )
+        self._child_machines[state_name] = child
+        self._active_invoke = state_name
+
+        # Set up completion/error listeners
+        async def on_transition_handler(old: StateValue, new: StateValue) -> None:
+            if new.is_compound():
+                return
+            child_state = new.leaf()
+            child_state_def = child._find_state_def(child_state)
+            if child_state_def and child_state_def.is_final:
+                # Child reached final state
+                if invoke_def.on_done:
+                    await self.send(invoke_def.on_done, {
+                        "child": invoke_def.machine,
+                        "final_state": child_state,
+                        "context": child.context,
+                    })
+                await child.stop()
+                self._child_machines.pop(state_name, None)
+                if self._active_invoke == state_name:
+                    self._active_invoke = None
+
+        child.on_transition = on_transition_handler
+        await child.start()
+
+    async def stop_child_machine(self, state_name: str) -> None:
+        """Stop a child machine associated with a state."""
+        if self._active_invoke == state_name:
+            child = self._child_machines.get(state_name)
+            if child:
+                await child.stop()
+                self._child_machines.pop(state_name, None)
+            self._active_invoke = None
 
     def register_action(self, name: str, handler: ActionHandler) -> None:
         """Register a handler for a plain (non-effect) action."""
@@ -180,6 +249,13 @@ class OrcaMachine:
             return
 
         self._cancel_timeout()
+
+        # Stop all child machines
+        for child in list(self._child_machines.values()):
+            await child.stop()
+        self._child_machines.clear()
+        self._active_invoke = None
+
         self._active = False
 
         await self.event_bus.publish(Event(
@@ -579,7 +655,15 @@ class OrcaMachine:
     async def _execute_entry_actions(self, state_name: str) -> None:
         """Execute on_entry action for a state."""
         state_def = self._find_state_def(state_name)
-        if not state_def or not state_def.on_entry:
+        if not state_def:
+            return
+
+        # Handle invoke - start child machine if present
+        if state_def.invoke:
+            await self.start_child_machine(state_name, state_def.invoke)
+            return  # Don't execute on_entry if invoke is set
+
+        if not state_def.on_entry:
             return
 
         action_def = self._find_action_def(state_def.on_entry)
@@ -623,6 +707,9 @@ class OrcaMachine:
 
     async def _execute_exit_actions(self, state_name: str) -> None:
         """Execute on_exit action for a state."""
+        # Stop child machine if this state has an invoke
+        await self.stop_child_machine(state_name)
+
         state_def = self._find_state_def(state_name)
         if not state_def or not state_def.on_exit:
             return
