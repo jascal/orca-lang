@@ -33,7 +33,14 @@ jobs:
         working-directory: packages/orca-lang
 
       - name: Publish
-        run: npm publish --access public
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
+            echo "Already published ${PKG}@${VER}, skipping"
+          else
+            npm publish --access public
+          fi
         working-directory: packages/orca-lang
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -62,7 +69,14 @@ jobs:
         working-directory: packages/runtime-ts
 
       - name: Publish
-        run: npm publish --access public
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
+            echo "Already published ${PKG}@${VER}, skipping"
+          else
+            npm publish --access public
+          fi
         working-directory: packages/runtime-ts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -96,7 +110,14 @@ jobs:
         working-directory: packages/mcp-server
 
       - name: Publish
-        run: npm publish --access public
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
+            echo "Already published ${PKG}@${VER}, skipping"
+          else
+            npm publish --access public
+          fi
         working-directory: packages/mcp-server
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
