@@ -44,11 +44,11 @@ fi
 
 echo "Installing packages..."
 .venv/bin/pip install -q -e ./packages/runtime-python
-.venv/bin/pip install -q -e ./packages/demo-python
+.venv/bin/pip install -q -e "./packages/demo-python[dev]"
 
 # Install demo-nanolab if it exists
 if [ -d ./packages/demo-nanolab ]; then
-  .venv/bin/pip install -q -e ./packages/demo-nanolab
+  .venv/bin/pip install -q -e "./packages/demo-nanolab[dev]"
 fi
 
 echo "Done. Python environment ready at .venv/ (Python $VERSION)"

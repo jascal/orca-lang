@@ -320,6 +320,7 @@ budget, or search strategy based on what it observed.
 | run_dir          | string | ""                 |
 | dataset          | string | "shakespeare_char" |
 | device           | string | "cpu"              |
+| max_iters        | number | 500                |
 | batch_size       | number | 64                 |
 | block_size       | number | 256                |
 | trial_a_n_layer  | number | 4                  |

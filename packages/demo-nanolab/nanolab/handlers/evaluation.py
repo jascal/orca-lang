@@ -87,7 +87,7 @@ async def generate_samples(ctx: dict[str, Any], evt: Any = None) -> dict[str, An
         "--max_new_tokens=200",
         "--temperature=0.8",
         "--top_k=200",
-        "--start=\\n",
+        "--start=\n",
     ]
 
     console.print("     [label]generating samples…[/label]")
