@@ -10,40 +10,27 @@ MIN_MINOR=10
 
 find_python() {
   # Try versioned binaries from newest to oldest, then fall back to python3
+  # Must actually run each candidate to verify it exists (not just a pyenv shim)
   for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
-    if command -v "$cmd" &>/dev/null; then
-      echo "$cmd"
-      return 0
+    if [ -x "$cmd" ] || command -v "$cmd" &>/dev/null; then
+      version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || continue
+      major=$(echo "$version" | cut -d. -f1)
+      minor=$(echo "$version" | cut -d. -f2)
+      if [ "$major" -gt "$MIN_MAJOR" ] || { [ "$major" -eq "$MIN_MAJOR" ] && [ "$minor" -ge "$MIN_MINOR" ]; }; then
+        echo "$cmd:$version"
+        return 0
+      fi
     fi
   done
   return 1
 }
 
-check_version() {
-  local cmd="$1"
-  local version
-  version=$("$cmd" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null) || return 1
-  local major minor
-  major=$(echo "$version" | cut -d. -f1)
-  minor=$(echo "$version" | cut -d. -f2)
-
-  if [ "$major" -gt "$MIN_MAJOR" ] || { [ "$major" -eq "$MIN_MAJOR" ] && [ "$minor" -ge "$MIN_MINOR" ]; }; then
-    echo "$version"
-    return 0
-  fi
-  return 1
-}
-
-PYTHON=$(find_python) || {
+RESULT=$(find_python) || {
   echo "Error: No Python interpreter found. Install Python >= ${MIN_MAJOR}.${MIN_MINOR}."
   exit 1
 }
-
-VERSION=$(check_version "$PYTHON") || {
-  actual=$("$PYTHON" --version 2>&1)
-  echo "Error: $PYTHON is $actual but Python >= ${MIN_MAJOR}.${MIN_MINOR} is required."
-  exit 1
-}
+PYTHON=${RESULT%%:*}
+VERSION=${RESULT#*:}
 
 echo "Using $PYTHON ($VERSION)"
 
