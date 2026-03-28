@@ -99,6 +99,18 @@
 | EstimateLoss | `{ checkpoint_dir: string, config_path: string }`              | `{ train_loss: float, val_loss: float }`                 |
 | TextGenerate | `{ checkpoint_dir: string, device: string, num_samples: int }` | `{ samples: string[], sample_text: string }`             |
 
+## persistence
+
+| Strategy | Location              | On         | Scope       |
+|----------|-----------------------|------------|-------------|
+| file     | `{base_dir}/{run_id}` | transition | TrainingLab |
+
+Only the top-level TrainingLab machine is checkpointed. Child machines
+(DataPipeline, HyperSearch, TrainingRun, Evaluator) are re-driven from the
+restored context, which already contains their merged outputs. The nanoGPT
+`train.py` handles its own model checkpointing independently — configure_run
+detects an existing `ckpt.pt` and sets `init_from = resume` automatically.
+
 ---
 
 # machine DataPipeline

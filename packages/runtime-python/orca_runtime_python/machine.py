@@ -153,6 +153,37 @@ class OrcaMachine:
             for leaf in self._state.leaves():
                 self._start_timeout_for_state(leaf)
 
+    async def resume(self, snap: dict[str, Any]) -> None:
+        """
+        Boot the machine from a saved snapshot, skipping on_entry for the
+        restored state.  Use instead of start() when resuming a crashed run.
+
+        Unlike restore() (which is a live-machine primitive), resume() is the
+        cold-start path: the machine was inactive, a snapshot was found on
+        disk, and we want to continue from where we left off without
+        re-executing the actions that already ran before the crash.
+        """
+        import copy
+        if self._active:
+            return
+
+        self._state = StateValue(copy.deepcopy(snap["state"]))
+        self.context = copy.deepcopy(snap["context"])
+        self._active = True
+
+        await self.event_bus.publish(Event(
+            type=EventType.MACHINE_STARTED,
+            source=self.definition.name,
+            payload={
+                "machine": self.definition.name,
+                "initial_state": self._state.value,
+                "resumed": True,
+            }
+        ))
+
+        for leaf in self._state.leaves():
+            self._start_timeout_for_state(leaf)
+
     def register_machines(self, machines: dict[str, MachineDef]) -> None:
         """Register sibling machines for invocation."""
         self._sibling_machines = machines

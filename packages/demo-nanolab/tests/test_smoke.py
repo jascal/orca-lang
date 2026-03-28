@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 from orca_runtime_python import OrcaMachine, EventBus
 from orca_runtime_python.parser import parse_orca_md, parse_orca_md_multi
+from orca_runtime_python import FilePersistence
 
 
 ORCA_PATH = Path(__file__).parent.parent / "orca" / "training-lab.orca.md"
@@ -390,6 +391,145 @@ async def test_pipeline_training_error():
         result = await run_pipeline(machines, _make_traininglab_context(), verbose=False)
         assert result["_final_state"] == "failed"
         assert result["error_message"] == "CUDA out of memory"
+    finally:
+        ACTION_REGISTRY.clear()
+        ACTION_REGISTRY.update(original)
+
+
+# ── Persistence ────────────────────────────────────────────────────
+
+def test_file_persistence_save_load(tmp_path):
+    """FilePersistence round-trips a snapshot dict via JSON."""
+    fp = FilePersistence(tmp_path)
+    snap = {
+        "state": "training",
+        "context": {"iter_num": 100, "val_loss": 2.3, "error_message": ""},
+        "children": {},
+        "active_invoke": None,
+        "timestamp": 1234567890.0,
+    }
+
+    assert not fp.exists("exp-001")
+    fp.save("exp-001", snap)
+    assert fp.exists("exp-001")
+    assert not fp.exists("exp-002")
+
+    loaded = fp.load("exp-001")
+    assert loaded["state"] == "training"
+    assert loaded["context"]["iter_num"] == 100
+    assert loaded["context"]["val_loss"] == pytest.approx(2.3)
+
+    assert fp.load("no-such-run") is None
+
+
+@pytest.mark.asyncio
+async def test_resume_skips_on_entry():
+    """OrcaMachine.resume() restores state without re-running on_entry."""
+    machines = _load_all()
+    defn = machines["TrainingLab"]
+
+    # Advance a real machine to data_prep so we have a mid-flight snapshot
+    m1 = OrcaMachine(defn, event_bus=EventBus(), context=_make_traininglab_context())
+    await m1.start()
+    await m1.send("START")
+    assert m1.state.leaf() == "data_prep"
+    snap = m1.snapshot()
+    await m1.stop()
+
+    # Create a fresh machine; track if on_entry would have run (it shouldn't)
+    on_entry_calls = []
+
+    async def mock_check_data(ctx, evt=None):
+        on_entry_calls.append("check_data")
+        return {"data_exists": True}
+
+    m2 = OrcaMachine(defn, event_bus=EventBus(), context=_make_traininglab_context())
+    m2.register_action("check_data", mock_check_data)
+
+    # resume() — should NOT call check_data (on_entry for data_prep invoke state)
+    await m2.resume(snap)
+    assert m2.state.leaf() == "data_prep"
+    assert m2.is_active
+    assert on_entry_calls == [], "resume() must not re-run on_entry"
+
+    # Machine is functional — can still accept events
+    result = await m2.send("ERROR")
+    assert result.taken
+    assert m2.state.leaf() == "failed"
+    await m2.stop()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_resumes_mid_flight(tmp_path):
+    """
+    Pipeline resumes from a mid-flight snapshot, skipping already-completed
+    phases. Actions from before the checkpoint are not re-called.
+    """
+    from nanolab.driver import run_pipeline, ACTION_REGISTRY
+
+    machines = _load_all()
+    fp = FilePersistence(tmp_path)
+
+    # Inject a snapshot that simulates TrainingLab having already completed
+    # data_prep and hyper_search — now entering "training" with the winning
+    # hyperparameter config already in context.
+    mid_snap = {
+        "state": "training",
+        "context": {
+            **_make_traininglab_context(),
+            "data_exists": True,
+            "vocab_size": 65,
+            "train_tokens": 900000,
+            "val_tokens": 100000,
+            "n_layer": 4,      # winning config from HyperSearch
+            "n_head": 4,
+            "n_embd": 256,
+            "learning_rate": 6e-4,
+        },
+        "children": {},
+        "active_invoke": None,
+        "timestamp": 0.0,
+    }
+    fp.save("exp-resume", mid_snap)
+
+    mock_check = AsyncMock(return_value={"data_exists": True})
+    mock_configure = AsyncMock(return_value={"config_path": "/tmp/config.py"})
+    mock_train = AsyncMock(return_value={"train_loss": 2.1, "val_loss": 2.3,
+                                          "best_val_loss": 2.3, "iter_num": 100})
+    mock_eval = AsyncMock(return_value={"train_loss": 2.0, "val_loss": 2.2})
+    mock_gen = AsyncMock(return_value={"sample_text": "ROMEO: To be"})
+
+    original = dict(ACTION_REGISTRY)
+    ACTION_REGISTRY.update({
+        "check_data": mock_check,
+        "configure_run": mock_configure,
+        "run_training": mock_train,
+        "evaluate_model": mock_eval,
+        "generate_samples": mock_gen,
+    })
+
+    try:
+        result = await run_pipeline(
+            machines,
+            _make_traininglab_context(),
+            verbose=False,
+            persistence=fp,
+            run_id="exp-resume",
+        )
+        assert result["_final_state"] == "completed"
+
+        # Data prep and hyper search phases were skipped — check_data not called
+        mock_check.assert_not_called()
+        # Only the full TrainingRun was invoked (1 configure_run, 1 run_training)
+        assert mock_configure.call_count == 1
+        assert mock_train.call_count == 1
+        mock_eval.assert_called_once()
+        mock_gen.assert_called_once()
+
+        # Checkpoint updated to completed state
+        final_snap = fp.load("exp-resume")
+        assert final_snap is not None
+        assert final_snap["state"] == "completed"
     finally:
         ACTION_REGISTRY.clear()
         ACTION_REGISTRY.update(original)

@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from orca_runtime_python import OrcaMachine, EventBus
+from orca_runtime_python.persistence import PersistenceAdapter
 from orca_runtime_python.types import InvokeDef, MachineDef, StateValue
 
 from .handlers.data_pipeline import check_data, prepare_data
@@ -238,11 +239,17 @@ async def _drive_machine(
     parent_ctx: dict[str, Any],
     verbose: bool,
     depth: int,
+    persistence: PersistenceAdapter | None = None,
+    run_id: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Recursively drive a machine to a final state.
 
     Returns (final_state_name, final_context).
+
+    When persistence and run_id are provided (top-level call only), the
+    machine's state is checkpointed after every transition and automatically
+    resumed from the last checkpoint if one exists.
     """
     defn = all_defs[machine_name]
     start_time = time.time()
@@ -257,11 +264,28 @@ async def _drive_machine(
     for name, handler in ACTION_REGISTRY.items():
         machine.register_action(name, handler)
 
+    # Wire up checkpoint-on-transition (top-level machine only)
+    if persistence is not None and run_id is not None:
+        async def _checkpoint(old_state: Any, new_state: Any) -> None:
+            persistence.save(run_id, machine.snapshot())
+        machine.on_transition = _checkpoint
+
+    # Resume from saved snapshot if one exists; otherwise start fresh
+    snap = (
+        persistence.load(run_id)
+        if persistence is not None and run_id is not None
+        else None
+    )
+    resumed = snap is not None
+
     if verbose:
         print_machine_start(machine_name, depth)
 
-    # start() executes on_entry for the initial state
-    await machine.start()
+    if resumed:
+        await machine.resume(snap)
+    else:
+        # start() executes on_entry for the initial state
+        await machine.start()
 
     # Compute the first event based on what just ran
     initial_state = _leaf(machine.state)
@@ -362,14 +386,22 @@ async def run_pipeline(
     all_defs: dict[str, MachineDef],
     init_ctx: dict[str, Any],
     verbose: bool = True,
+    persistence: PersistenceAdapter | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Run the complete TrainingLab pipeline.
 
     Args:
-        all_defs:  Dict mapping machine name → MachineDef (all 5 machines).
-        init_ctx:  Initial context overrides for TrainingLab.
-        verbose:   Whether to print progress.
+        all_defs:    Dict mapping machine name → MachineDef (all 5 machines).
+        init_ctx:    Initial context overrides for TrainingLab.
+        verbose:     Whether to print progress.
+        persistence: Optional adapter for checkpointing. When provided with
+                     run_id, the pipeline saves state after every transition
+                     and automatically resumes from the last checkpoint on
+                     restart.
+        run_id:      Identifier for this run (e.g. "exp-001"). Required when
+                     persistence is provided.
 
     Returns:
         Final context dict with '_final_state' key added.
@@ -388,6 +420,8 @@ async def run_pipeline(
         init_ctx,
         verbose=verbose,
         depth=0,
+        persistence=persistence,
+        run_id=run_id,
     )
 
     elapsed = time.time() - start_time

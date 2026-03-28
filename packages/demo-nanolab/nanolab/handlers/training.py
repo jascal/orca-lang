@@ -105,7 +105,7 @@ async def configure_run(ctx: dict[str, Any], evt: Any = None) -> dict[str, Any]:
         "eval_interval": min(250, ctx.get("max_iters", 500) // 4 or 50),
         "eval_iters": 100,  # fewer eval iters for speed
         "log_interval": 10,
-        "always_save_checkpoint": False,
+        "always_save_checkpoint": True,
         # Model
         "n_layer": ctx.get("n_layer", 6),
         "n_head": ctx.get("n_head", 6),
@@ -127,6 +127,10 @@ async def configure_run(ctx: dict[str, Any], evt: Any = None) -> dict[str, Any]:
         "compile": False,  # don't compile on cpu/mps
         "wandb_log": False,
     }
+
+    # Resume from existing checkpoint if one is present
+    ckpt_path = Path(config["out_dir"]) / "ckpt.pt"
+    config["init_from"] = "resume" if ckpt_path.exists() else "scratch"
 
     # Write config file
     config_path = run_dir / "config.py"

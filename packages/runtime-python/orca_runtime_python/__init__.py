@@ -29,6 +29,8 @@ from .machine import OrcaMachine
 
 from .parser import parse_orca_md, parse_orca_auto
 
+from .persistence import PersistenceAdapter, FilePersistence
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -54,4 +56,7 @@ __all__ = [
     # Parser
     "parse_orca_md",
     "parse_orca_auto",
+    # Persistence
+    "PersistenceAdapter",
+    "FilePersistence",
 ]
