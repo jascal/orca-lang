@@ -161,7 +161,7 @@ npx tsx src/index.ts compile xstate examples/payment-processor.orca.md
 npx tsx src/index.ts compile mermaid examples/text-adventure.orca.md
 
 # Convert legacy .orca to .orca.md
-npx tsx src/index.ts convert examples/old-machine.orca
+# npx tsx src/index.ts convert <path-to-legacy.orca>
 ```
 
 ---
@@ -341,7 +341,7 @@ pnpm test:lang
 cd packages/runtime-go && go test ./...
 
 # Python runtime
-cd packages/orca-lang && ../.venv/bin/python -m pytest packages/runtime-python/tests/ -v
+cd packages/orca-lang && ../../.venv/bin/python -m pytest ../runtime-python/tests/ -v
 
 # nanolab tests
 pnpm run test:demo-nanolab
