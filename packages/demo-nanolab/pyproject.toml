@@ -5,6 +5,7 @@ description = "Orca-orchestrated nanoGPT training lab"
 requires-python = ">=3.11"
 dependencies = [
     "orca-runtime-python",
+    "rich>=13.0",
 ]
 
 [project.optional-dependencies]

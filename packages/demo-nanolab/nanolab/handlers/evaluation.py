@@ -1,27 +1,30 @@
 """Action handlers for model evaluation and sample generation."""
 
-import sys
 import asyncio
 import re
+import sys
 from pathlib import Path
 from typing import Any
+
+from nanolab.display.terminal import console
 
 
 async def evaluate_model(ctx: dict[str, Any], evt: Any = None) -> dict[str, Any]:
     """Evaluate the trained model by running an eval-only pass."""
-    vendor_dir = Path(ctx["vendor_dir"])
-    run_dir = Path(ctx["run_dir"])
+    vendor_dir     = Path(ctx["vendor_dir"])
+    run_dir        = Path(ctx["run_dir"])
     checkpoint_dir = run_dir / "checkpoints"
-    ckpt_path = checkpoint_dir / "ckpt.pt"
+    ckpt_path      = checkpoint_dir / "ckpt.pt"
 
     if not ckpt_path.exists():
-        # No checkpoint saved (training may have been too short) — use last training metrics
-        print("  No checkpoint found — using training metrics")
+        console.print(
+            "     [state.err]✗[/state.err]  "
+            "[label]no checkpoint — using training metrics[/label]"
+        )
         return {}
 
     config_path = ctx.get("config_path", str(run_dir / "config.py"))
 
-    # Run train.py with eval_only=True to get final loss estimate
     cmd = [
         sys.executable, str(vendor_dir / "train.py"),
         str(config_path),
@@ -30,7 +33,7 @@ async def evaluate_model(ctx: dict[str, Any], evt: Any = None) -> dict[str, Any]
         f"--out_dir={checkpoint_dir}",
     ]
 
-    print(f"  Evaluating checkpoint...")
+    console.print("     [label]evaluating checkpoint…[/label]")
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(vendor_dir),
@@ -41,29 +44,35 @@ async def evaluate_model(ctx: dict[str, Any], evt: Any = None) -> dict[str, Any]
     output = stdout.decode() if stdout else ""
 
     result: dict[str, Any] = {}
-    eval_pattern = re.compile(
-        r"step \d+: train loss ([\d.]+), val loss ([\d.]+)"
-    )
+    eval_pattern = re.compile(r"step \d+: train loss ([\d.]+), val loss ([\d.]+)")
     for line in output.split("\n"):
         m = eval_pattern.search(line)
         if m:
             result["train_loss"] = float(m.group(1))
-            result["val_loss"] = float(m.group(2))
-            print(f"  Eval: train_loss={result['train_loss']:.4f}, "
-                  f"val_loss={result['val_loss']:.4f}")
+            result["val_loss"]   = float(m.group(2))
+
+    if result:
+        console.print(
+            f"     [state.ok]✓[/state.ok]  "
+            f"[label]train=[/label][metric.val]{result['train_loss']:.4f}[/metric.val]  "
+            f"[label]val=[/label][metric.good]{result['val_loss']:.4f}[/metric.good]"
+        )
 
     return result
 
 
 async def generate_samples(ctx: dict[str, Any], evt: Any = None) -> dict[str, Any]:
     """Generate text samples from the trained model using sample.py."""
-    vendor_dir = Path(ctx["vendor_dir"])
-    run_dir = Path(ctx["run_dir"])
+    vendor_dir     = Path(ctx["vendor_dir"])
+    run_dir        = Path(ctx["run_dir"])
     checkpoint_dir = run_dir / "checkpoints"
-    ckpt_path = checkpoint_dir / "ckpt.pt"
+    ckpt_path      = checkpoint_dir / "ckpt.pt"
 
     if not ckpt_path.exists():
-        print("  No checkpoint found — skipping sample generation")
+        console.print(
+            "     [state.err]✗[/state.err]  "
+            "[label]no checkpoint — skipping sample generation[/label]"
+        )
         return {"sample_text": "(no checkpoint to sample from)"}
 
     device = ctx.get("device", "cpu")
@@ -78,10 +87,10 @@ async def generate_samples(ctx: dict[str, Any], evt: Any = None) -> dict[str, An
         "--max_new_tokens=200",
         "--temperature=0.8",
         "--top_k=200",
-        f"--start=\\n",
+        "--start=\\n",
     ]
 
-    print(f"  Generating samples...")
+    console.print("     [label]generating samples…[/label]")
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(vendor_dir),
@@ -92,45 +101,48 @@ async def generate_samples(ctx: dict[str, Any], evt: Any = None) -> dict[str, An
     output = stdout.decode() if stdout else ""
 
     if proc.returncode != 0:
-        print(f"  Sample generation failed (exit {proc.returncode})")
-        # Show first few lines of output for debugging
-        for line in output.split("\n")[:5]:
+        console.print(
+            f"     [state.err]✗[/state.err]  "
+            f"[label]sample.py failed (exit {proc.returncode})[/label]"
+        )
+        for line in output.split("\n")[:4]:
             if line.strip():
-                print(f"    {line.strip()}")
+                console.print(f"       [dim]{line.strip()}[/dim]")
         return {"sample_text": f"(generation failed: exit {proc.returncode})"}
 
-    # Parse samples — they're separated by "---------------"
-    samples = []
-    current_sample: list[str] = []
+    # Parse samples separated by "---------------"
+    samples: list[str] = []
+    current: list[str] = []
     for line in output.split("\n"):
         if line.strip() == "---------------":
-            if current_sample:
-                samples.append("\n".join(current_sample).strip())
-                current_sample = []
+            if current:
+                samples.append("\n".join(current).strip())
+                current = []
         elif not any(kw in line for kw in ["Loading meta", "number of parameters"]):
-            current_sample.append(line)
-    if current_sample:
-        text = "\n".join(current_sample).strip()
+            current.append(line)
+    if current:
+        text = "\n".join(current).strip()
         if text:
             samples.append(text)
 
     if samples:
-        # Show first sample (truncated)
-        preview = samples[0][:300]
-        print(f"  Sample 1 ({len(samples[0])} chars):")
-        for line in preview.split("\n")[:6]:
-            print(f"    {line}")
+        preview = samples[0][:300].strip()
+        lines   = preview.split("\n")[:5]
+        console.print(
+            f"     [state.ok]✓[/state.ok]  "
+            f"[label]{len(samples)} samples  ·  "
+            f"{len(samples[0])} chars[/label]"
+        )
+        for line in lines:
+            console.print(f"       [dim italic]{line}[/dim italic]")
         if len(samples[0]) > 300:
-            print(f"    ...")
+            console.print("       [dim]…[/dim]")
 
-        # Save all samples
         samples_path = run_dir / "samples.txt"
         samples_path.write_text(
             "\n\n--- sample ---\n\n".join(samples) + "\n"
         )
-        print(f"  {len(samples)} samples saved to {samples_path}")
-
         return {"sample_text": samples[0]}
     else:
-        print("  No samples generated")
+        console.print("     [label]no samples generated[/label]")
         return {"sample_text": "(no output)"}
