@@ -6,6 +6,15 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.1] — 2026-03-28
+
+### Fixed
+
+- `@orcalang/orca-mcp-server`: publish now uses `pnpm publish` so the `workspace:*` dependency on `@orcalang/orca-lang` is correctly resolved to `^0.1.1` in the published package. The `0.1.0` release was broken (`npx @orcalang/orca-mcp-server` failed with `EUNSUPPORTEDPROTOCOL`).
+- Claude Code skill files added to `.claude/skills/` — six invocable skills: `/orca-generate`, `/orca-verify`, `/orca-compile`, `/orca-refine`, `/orca-actions`, `/orca-generate-multi`.
+
+---
+
 ## [v0.1.0] — 2026-03-28
 
 First public release. All core language features, three runtimes at feature parity, four demo applications, and the agent adoption layer are complete.

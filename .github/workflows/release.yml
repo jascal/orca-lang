@@ -39,7 +39,7 @@ jobs:
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
             echo "Already published ${PKG}@${VER}, skipping"
           else
-            npm publish --access public
+            pnpm publish --access public --no-git-checks
           fi
         working-directory: packages/orca-lang
         env:
@@ -75,7 +75,7 @@ jobs:
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
             echo "Already published ${PKG}@${VER}, skipping"
           else
-            npm publish --access public
+            pnpm publish --access public --no-git-checks
           fi
         working-directory: packages/runtime-ts
         env:
@@ -116,7 +116,7 @@ jobs:
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
             echo "Already published ${PKG}@${VER}, skipping"
           else
-            npm publish --access public
+            pnpm publish --access public --no-git-checks
           fi
         working-directory: packages/mcp-server
         env:
