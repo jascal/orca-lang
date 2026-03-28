@@ -324,6 +324,11 @@ cd packages/demo-go && ./trip --resume
 
 # nanoGPT training orchestrator (Python, no torch required for tests)
 pnpm run test:demo-nanolab
+
+# nanoGPT training with PyTorch (GPU support)
+# Install torch with GPU support, then run the full pipeline
+.venv/bin/pip install torch torchvision torchaudio
+pnpm run run:demo-nanolab
 ```
 
 ---
