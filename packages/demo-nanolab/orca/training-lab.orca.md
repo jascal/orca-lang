@@ -124,6 +124,27 @@ every invoked child). Each entry includes: `ts`, `run_id`, `machine`, `event`,
 `from`, `to`, and `context_delta` (only fields that changed in that step).
 Inject a sink via the `log_sink` parameter of `run_pipeline`.
 
+## refinement
+
+After a run completes, `nanolab.refine.refine_workflow()` feeds the audit log
+and final context back to Claude to produce an improved workflow definition.
+
+```
+python -m nanolab --refine --log runs/<id>/audit.jsonl --api-key $ANTHROPIC_API_KEY
+```
+
+The refinement prompt includes:
+- The complete current `.orca.md` (all 5 machines)
+- HyperSearch trial comparison table (A vs B val_loss, config details)
+- Full training run metrics (final/best val_loss, convergence eval count)
+- TrainingLab transition sequence extracted from the audit log
+
+Claude returns a revised `.orca.md` saved as
+`training-lab-refined-<run_id>.orca.md` alongside the original. The recursive
+narrative: the Orca machine that orchestrated training now rewrites itself for
+the next run — adjusting hyperparameter defaults, trial diversity, training
+budget, or search strategy based on what it observed.
+
 ---
 
 # machine DataPipeline

@@ -212,3 +212,86 @@ def print_summary(ctx: dict[str, Any], elapsed: float) -> None:
         padding=(1, 2),
     ))
     console.print()
+
+
+# ── Phase 8: Refinement display ────────────────────────────────────────────────
+
+def print_refine_start(orca_path: str, model: str) -> None:
+    console.print()
+    console.print(Rule(
+        title="[bold magenta]✨  Workflow Refinement[/bold magenta]  "
+              "[dim white]·  Phase 8[/dim white]",
+        style="magenta",
+    ))
+    console.print(
+        f"  [label]model[/label]  [metric.val]{model}[/metric.val]  "
+        f"[label]·  workflow[/label]  [dim]{orca_path}[/dim]"
+    )
+    console.print()
+
+
+def print_refine_result(
+    out_path: str,
+    summary: dict[str, Any],
+) -> None:
+    """Render a rich summary of what was sent to the LLM and where the result landed."""
+    winner = summary.get("winner")
+    trials = summary.get("trials", {})
+
+    tbl = Table(
+        box=box.SIMPLE,
+        show_header=False,
+        padding=(0, 2),
+        expand=False,
+        show_edge=False,
+    )
+    tbl.add_column("key",   style="metric.key",  min_width=16)
+    tbl.add_column("value", style="metric.val")
+
+    tbl.add_row("Dataset", summary.get("dataset", "?"))
+    tbl.add_row(
+        "Run outcome",
+        f"[metric.good]{summary.get('final_state','?')}[/metric.good]"
+    )
+
+    a = trials.get("trial_a", {})
+    b = trials.get("trial_b", {})
+    if a.get("val_loss", 999) < 999:
+        tbl.add_row(
+            "Trial A",
+            f"n_layer={a.get('n_layer','?')} · n_embd={a.get('n_embd','?')} "
+            f"· val={a.get('val_loss',999):.4f}"
+            + ("  [metric.good]← winner[/metric.good]" if winner == "A" else ""),
+        )
+    if b.get("val_loss", 999) < 999:
+        tbl.add_row(
+            "Trial B",
+            f"n_layer={b.get('n_layer','?')} · n_embd={b.get('n_embd','?')} "
+            f"· val={b.get('val_loss',999):.4f}"
+            + ("  [metric.good]← winner[/metric.good]" if winner == "B" else ""),
+        )
+
+    best = summary.get("best_val_loss", 999)
+    if best < 999:
+        tbl.add_row("Best val loss", f"[metric.good]{best:.4f}[/metric.good]")
+
+    tbl.add_row("Refined workflow", f"[dim]{out_path}[/dim]")
+
+    console.print(Panel(
+        tbl,
+        title="[bold magenta]✨  Refinement Complete[/bold magenta]",
+        subtitle="[label]review the refined .orca.md · compare with the original[/label]",
+        border_style="magenta",
+        padding=(1, 2),
+    ))
+    console.print()
+
+
+def print_refine_error(error: str) -> None:
+    console.print(Panel(
+        f"[metric.bad]{error}[/metric.bad]",
+        title="[bold red]✗  Refinement Failed[/bold red]",
+        border_style="red",
+        padding=(1, 2),
+    ))
+    console.print()

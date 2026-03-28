@@ -10,7 +10,8 @@ dependencies = [
 
 [project.optional-dependencies]
 train = ["torch>=2.0", "numpy", "requests"]
-dev = ["pytest", "pytest-asyncio"]
+llm   = ["anthropic>=0.18"]
+dev   = ["pytest", "pytest-asyncio"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
