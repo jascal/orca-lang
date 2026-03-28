@@ -83,7 +83,7 @@ orca /verify-orca machine.orca.md        # always returns JSON
 ### TypeScript library
 
 ```bash
-npm install orca-lang
+npm install @orcalang/orca-lang
 ```
 
 ```typescript

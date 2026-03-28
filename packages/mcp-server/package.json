@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.28.0",
-    "orca-lang": "workspace:*"
+    "@orcalang/orca-lang": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
