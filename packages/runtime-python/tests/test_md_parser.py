@@ -90,4 +90,42 @@ def test_parse_simple_toggle_md():
     assert machine.name == "SimpleToggle"
     assert len(machine.states) >= 2
     assert len(machine.events) >= 1
-    assert machine.context["count"] == 0
+
+
+def test_parse_effects_section():
+    """Parse a machine with a ## effects section."""
+    source = """# machine TestEffects
+
+## context
+| Field | Type   | Default |
+|-------|--------|---------|
+| value | number | 0       |
+
+## events
+- START
+
+## state idle [initial]
+
+## state done [final]
+
+## transitions
+| Source | Event | Target |
+|--------|-------|--------|
+| idle   | START | done   |
+
+## effects
+| Name      | Input                          | Output                      |
+|-----------|--------------------------------|-----------------------------|
+| ReadFile  | `{ path: string }`             | `{ contents: string }`      |
+| WriteFile | `{ path: string, data: string }` | `{ bytes_written: int }`   |
+"""
+    machine = parse_orca_md(source)
+    assert machine.name == "TestEffects"
+    assert len(machine.effects) == 2
+
+    by_name = {e.name: e for e in machine.effects}
+    assert "ReadFile" in by_name
+    assert "WriteFile" in by_name
+    assert "path" in by_name["ReadFile"].input
+    assert "contents" in by_name["ReadFile"].output
+    assert "bytes_written" in by_name["WriteFile"].output

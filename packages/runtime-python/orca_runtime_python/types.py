@@ -81,6 +81,14 @@ class ActionSignature:
 
 
 @dataclass
+class EffectDef:
+    """Effect type declaration from the ## effects section."""
+    name: str
+    input: str   # type description (e.g. '{ cmd: string, cwd: string }')
+    output: str  # type description (e.g. '{ exit_code: int, stdout: string }')
+
+
+@dataclass
 class MachineDef:
     """Complete Orca machine definition."""
     name: str
@@ -90,6 +98,7 @@ class MachineDef:
     transitions: list[Transition]
     guards: dict[str, GuardExpression] = field(default_factory=dict)
     actions: list[ActionSignature] = field(default_factory=list)
+    effects: list[EffectDef] = field(default_factory=list)
 
 
 class GuardExpression:

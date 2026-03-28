@@ -19,6 +19,7 @@ packages/
   demo-ts/         Text adventure game demo (uses runtime-ts)
   demo-python/     Agent framework demo (uses runtime-python)
   demo-go/         (planned) Ride-hailing trip coordinator demo (uses runtime-go)
+  demo-nanolab/    nanoGPT training orchestrator demo (uses runtime-python)
 ```
 
 ## Setup
@@ -27,10 +28,8 @@ packages/
 # TypeScript packages (from repo root)
 pnpm install
 
-# Python packages (from repo root)
-python3 -m venv .venv
-.venv/bin/pip install -e ./packages/runtime-python
-.venv/bin/pip install -e ./packages/demo-python
+# Python packages — auto-detects Python >= 3.10 (installs runtime, demo, nanolab)
+pnpm run setup:python
 
 # Go packages (from repo root)
 pnpm run setup:go
@@ -57,6 +56,9 @@ pnpm run test:demo-python
 
 # Run Go demo
 pnpm run test:demo-go
+
+# Run nanolab demo tests (machine parsing + pipeline logic, no torch required)
+pnpm run test:demo-nanolab
 
 # Interactive text adventure
 cd packages/demo-ts && pnpm run cli
@@ -93,12 +95,16 @@ Playable text adventure game. Interactive CLI, 8-state machine, world map with 4
 ### packages/demo-python (orca-demo-python)
 Agent framework demo with 4 scenarios: order processing (8-state workflow), multi-agent task orchestration, event bus request/response, and parsed Orca machine.
 
+### packages/demo-nanolab (orca-demo-nanolab)
+nanoGPT training orchestrator. 4-machine architecture in a single `.orca.md` file (separated by `---`): TrainingLab (orchestrator with `invoke:` states), DataPipeline (data check/download), TrainingRun (configure + train), Evaluator (eval + generate). Recursive multi-machine driver in `driver.py` handles child invocations and context merging. Vendors nanoGPT's `train.py`/`model.py`/`sample.py`. Declares `## effects` section. Requires `torch` for actual training; 15 smoke tests run without it. Design doc: `docs/demo-nanolab.md`.
+
 ## Cross-Package Dependencies
 
 ```
 demo-ts      ──depends on──>  runtime-ts      (pnpm workspace:*)
 demo-python  ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
 demo-go      ──depends on──>  runtime-go      (go module dependency)
+demo-nanolab ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
 ```
 
 The orca-lang package is independent — runtimes implement their own parsers and can operate without it.
@@ -112,6 +118,8 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 **Phase 4 Complete**: Machine invocation — state machines calling other state machines. `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, cross-machine verifier (cycle detection, child reachability, machine resolution), XState invoke config (`__machine__:Name`), runtime-ts and runtime-python child lifecycle (start on entry, stop on exit, completion events, snapshot/restore). 128 orca-lang tests, 63 runtime-ts tests, 68 runtime-python tests.
 
 **Phase 4.5 In Progress**: Go runtime — `runtime-go` package with core runtime (machine, guards, actions, event bus, timeouts, snapshot/restore, invoke parsing), 16 tests passing; `demo-go` with 5-machine `trip.orca.md` definition. Design doc: `docs/demo-ride-hailing.md`.
+
+**Phase 5 (nanolab) In Progress**: demo-nanolab — nanoGPT training orchestrator. Phase 1 complete (single TrainingLab machine, 6 effect handlers). Phase 2 complete (`## effects` section in Python parser + `EffectDef` type, 69 runtime-python tests). Phase 3 complete: 4-machine architecture — TrainingLab orchestrates DataPipeline, TrainingRun, Evaluator via `invoke:` states; recursive multi-machine driver with context merging; runtime fix to call on_entry handlers without requiring `## actions` declaration; 15 smoke tests. Next: persistence (Phase 5), logging (Phase 6). Design doc: `docs/demo-nanolab.md`.
 
 ## Known Limitations (v1 parallel regions)
 - `any-final` sync strategy has no native XState equivalent — works in standalone runtimes only

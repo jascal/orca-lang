@@ -17,6 +17,7 @@ from .types import (
     Transition,
     GuardDef,
     ActionSignature,
+    EffectDef,
     GuardExpression,
     GuardTrue,
     GuardFalse,
@@ -371,6 +372,10 @@ def _build_md_parallel_regions(
                     s.timeout = e.timeout
                 if e.ignored_events:
                     s.ignored_events = list(e.ignored_events)
+                if e.invoke:
+                    s.invoke = e.invoke
+                if e.on_done:
+                    s.on_done = e.on_done
                 region_states.append(s)
                 i += 1
             else:
@@ -653,6 +658,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
     transitions: list[Transition] = []
     guards: dict[str, GuardExpression] = {}
     actions: list[ActionSignature] = []
+    effects: list[EffectDef] = []
     state_entries: list[_MdStateEntry] = []
     current_state_entry: _MdStateEntry | None = None
 
@@ -670,7 +676,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
 
             # Section headings
             section_name = el.text.lower()
-            if section_name in ("context", "events", "transitions", "guards", "actions"):
+            if section_name in ("context", "events", "transitions", "guards", "actions", "effects"):
                 current_state_entry = None
                 next_el = elements[i + 1] if i + 1 < len(elements) else None
 
@@ -745,6 +751,19 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
                     i += 2
                     continue
 
+                elif section_name == "effects" and isinstance(next_el, _MdTable):
+                    ni = _find_column_index(next_el.headers, "name")
+                    ii = _find_column_index(next_el.headers, "input")
+                    oi = _find_column_index(next_el.headers, "output")
+                    for row in next_el.rows:
+                        name = row[ni].strip() if ni >= 0 and ni < len(row) else ""
+                        input_str = _strip_backticks(row[ii].strip() if ii >= 0 and ii < len(row) else "")
+                        output_str = _strip_backticks(row[oi].strip() if oi >= 0 and oi < len(row) else "")
+                        if name:
+                            effects.append(EffectDef(name=name, input=input_str, output=output_str))
+                    i += 2
+                    continue
+
                 i += 1
                 continue
 
@@ -803,6 +822,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
         transitions=transitions,
         guards=guards,
         actions=actions,
+        effects=effects,
     )
 
 

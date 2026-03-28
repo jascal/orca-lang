@@ -668,7 +668,7 @@ class OrcaMachine:
 
         action_def = self._find_action_def(state_def.on_entry)
         if action_def and action_def.has_effect:
-            # Execute as effect
+            # Execute as effect via event bus
             effect = Effect(
                 type=action_def.effect_type or "Effect",
                 payload={
@@ -701,9 +701,11 @@ class OrcaMachine:
                     source=self.definition.name,
                     payload={"effect": effect.type, "error": result.error}
                 ))
-        elif action_def:
-            # Simple action without effect
-            await self._execute_action(action_def.name)
+        else:
+            # Simple action — call registered handler directly.
+            # The ## actions section is optional documentation; if a handler
+            # is registered we always call it regardless of action_def.
+            await self._execute_action(state_def.on_entry)
 
     async def _execute_exit_actions(self, state_name: str) -> None:
         """Execute on_exit action for a state."""
