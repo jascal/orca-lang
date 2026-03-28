@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from orca_runtime_python import OrcaMachine, EventBus
+from orca_runtime_python.logging import LogSink, _make_entry
 from orca_runtime_python.persistence import PersistenceAdapter
 from orca_runtime_python.types import InvokeDef, MachineDef, StateValue
 
@@ -241,6 +242,7 @@ async def _drive_machine(
     depth: int,
     persistence: PersistenceAdapter | None = None,
     run_id: str | None = None,
+    log_sink: LogSink | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Recursively drive a machine to a final state.
@@ -301,6 +303,10 @@ async def _drive_machine(
     prev_state = initial_state
 
     while _leaf(machine.state) not in FINAL_STATES:
+        # Snapshot context before this iteration for delta computation
+        _ctx_before = dict(machine.context)
+        _from_state = _leaf(machine.state)
+
         # ── Parallel state ──────────────────────────────────────────
         parallel_name = _get_parallel_parent(machine)
         if parallel_name:
@@ -311,6 +317,21 @@ async def _drive_machine(
             new_state = _leaf(machine.state)
             if verbose and new_state != prev_state:
                 print_transition(machine_name, prev_state, new_state, depth)
+
+            if log_sink is not None and new_state != _from_state:
+                delta = {
+                    k: v for k, v in machine.context.items()
+                    if v != _ctx_before.get(k)
+                }
+                log_sink.write(_make_entry(
+                    run_id=run_id or "",
+                    machine=machine_name,
+                    event="(parallel sync)",
+                    from_state=_from_state,
+                    to_state=new_state,
+                    context_delta=delta,
+                ))
+
             prev_state = new_state
             sd = machine._find_state_def(new_state)
             next_event = (
@@ -327,7 +348,8 @@ async def _drive_machine(
             child_ctx = _build_child_context(sd.invoke, dict(machine.context), child_def)
 
             child_final, child_output = await _drive_machine(
-                sd.invoke.machine, all_defs, bus, child_ctx, verbose, depth + 1
+                sd.invoke.machine, all_defs, bus, child_ctx, verbose, depth + 1,
+                log_sink=log_sink, run_id=run_id,
             )
 
             # Merge child output back to parent
@@ -360,6 +382,21 @@ async def _drive_machine(
         new_state = _leaf(machine.state)
         if verbose and new_state != prev_state:
             print_transition(machine_name, prev_state, new_state, depth)
+
+        if log_sink is not None:
+            delta = {
+                k: v for k, v in machine.context.items()
+                if v != _ctx_before.get(k)
+            }
+            log_sink.write(_make_entry(
+                run_id=run_id or "",
+                machine=machine_name,
+                event=next_event,
+                from_state=_from_state,
+                to_state=new_state,
+                context_delta=delta,
+            ))
+
         prev_state = new_state
 
         # Compute next event for the new state
@@ -388,6 +425,7 @@ async def run_pipeline(
     verbose: bool = True,
     persistence: PersistenceAdapter | None = None,
     run_id: str | None = None,
+    log_sink: LogSink | None = None,
 ) -> dict[str, Any]:
     """
     Run the complete TrainingLab pipeline.
@@ -402,6 +440,9 @@ async def run_pipeline(
                      restart.
         run_id:      Identifier for this run (e.g. "exp-001"). Required when
                      persistence is provided.
+        log_sink:    Optional sink for structured audit log entries. Each
+                     transition in every machine (including child machines)
+                     writes one entry. Use FileSink, ConsoleSink, or MultiSink.
 
     Returns:
         Final context dict with '_final_state' key added.
@@ -422,6 +463,7 @@ async def run_pipeline(
         depth=0,
         persistence=persistence,
         run_id=run_id,
+        log_sink=log_sink,
     )
 
     elapsed = time.time() - start_time

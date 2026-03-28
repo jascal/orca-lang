@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock
 from orca_runtime_python import OrcaMachine, EventBus
 from orca_runtime_python.parser import parse_orca_md, parse_orca_md_multi
 from orca_runtime_python import FilePersistence
+from orca_runtime_python import FileSink, ConsoleSink, MultiSink
+from orca_runtime_python.logging import _make_entry
 
 
 ORCA_PATH = Path(__file__).parent.parent / "orca" / "training-lab.orca.md"
@@ -533,3 +535,171 @@ async def test_pipeline_resumes_mid_flight(tmp_path):
     finally:
         ACTION_REGISTRY.clear()
         ACTION_REGISTRY.update(original)
+
+
+# ── Logging ────────────────────────────────────────────────────────
+
+class _ListSink:
+    """In-memory log sink for testing."""
+    def __init__(self):
+        self.entries = []
+    def write(self, entry):
+        self.entries.append(entry)
+    def close(self):
+        pass
+
+
+def test_make_entry_structure():
+    """_make_entry returns a well-formed log entry dict."""
+    entry = _make_entry(
+        run_id="test-run",
+        machine="TrainingLab",
+        event="DATA_READY",
+        from_state="data_prep",
+        to_state="hyper_search",
+        context_delta={"vocab_size": 65},
+    )
+    assert entry["run_id"] == "test-run"
+    assert entry["machine"] == "TrainingLab"
+    assert entry["event"] == "DATA_READY"
+    assert entry["from"] == "data_prep"
+    assert entry["to"] == "hyper_search"
+    assert entry["context_delta"] == {"vocab_size": 65}
+    # ISO 8601 UTC timestamp
+    assert entry["ts"].endswith("+00:00") or entry["ts"].endswith("Z")
+
+
+def test_file_sink_writes_jsonl(tmp_path):
+    """FileSink appends valid JSONL to a file."""
+    import json
+
+    sink = FileSink(tmp_path / "audit.jsonl")
+    sink.write({"run_id": "r1", "event": "START", "machine": "TrainingLab"})
+    sink.write({"run_id": "r1", "event": "DATA_READY", "machine": "TrainingLab"})
+    sink.close()
+
+    lines = (tmp_path / "audit.jsonl").read_text().strip().splitlines()
+    assert len(lines) == 2
+    first = json.loads(lines[0])
+    assert first["event"] == "START"
+    second = json.loads(lines[1])
+    assert second["event"] == "DATA_READY"
+
+
+def test_file_sink_appends(tmp_path):
+    """FileSink appends on repeated open (resume-safe)."""
+    import json
+
+    path = tmp_path / "audit.jsonl"
+    sink1 = FileSink(path)
+    sink1.write({"n": 1})
+    sink1.close()
+
+    sink2 = FileSink(path)
+    sink2.write({"n": 2})
+    sink2.close()
+
+    lines = path.read_text().strip().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["n"] == 1
+    assert json.loads(lines[1])["n"] == 2
+
+
+def test_console_sink_writes_to_stream():
+    """ConsoleSink writes a human-readable line without raising."""
+    import io
+
+    buf = io.StringIO()
+    sink = ConsoleSink(file=buf)
+    sink.write(_make_entry(
+        run_id="r",
+        machine="DataPipeline",
+        event="DATA_EXISTS",
+        from_state="checking",
+        to_state="ready",
+        context_delta={"data_exists": True},
+    ))
+    sink.close()
+
+    out = buf.getvalue()
+    assert "DataPipeline" in out
+    assert "checking" in out
+    assert "ready" in out
+    assert "DATA_EXISTS" in out
+
+
+def test_multi_sink_fans_out():
+    """MultiSink writes each entry to all child sinks."""
+    a, b = _ListSink(), _ListSink()
+    sink = MultiSink(a, b)
+    entry = {"event": "START"}
+    sink.write(entry)
+    sink.close()
+
+    assert a.entries == [entry]
+    assert b.entries == [entry]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_emits_log_entries():
+    """
+    run_pipeline with a log_sink produces one entry per transition
+    across all machines.  The top-level TrainingLab transitions appear
+    with machine="TrainingLab".
+    """
+    from nanolab.driver import run_pipeline, ACTION_REGISTRY
+
+    machines = _load_all()
+    sink = _ListSink()
+
+    original = dict(ACTION_REGISTRY)
+    ACTION_REGISTRY.update({
+        "check_data": AsyncMock(return_value={"data_exists": True, "vocab_size": 65,
+                                               "train_tokens": 900000, "val_tokens": 100000}),
+        "prepare_data": AsyncMock(return_value={}),
+        "configure_run": AsyncMock(return_value={"config_path": "/tmp/config.py"}),
+        "run_training": AsyncMock(return_value={"train_loss": 2.1, "val_loss": 2.3,
+                                                 "best_val_loss": 2.3, "iter_num": 100}),
+        "configure_trials": AsyncMock(return_value={
+            "trial_a_run_dir": "/tmp/a", "trial_b_run_dir": "/tmp/b",
+            "trial_a_max_iters": 50, "trial_b_max_iters": 50,
+        }),
+        "compare_trials": AsyncMock(return_value={"n_layer": 4, "n_head": 4, "n_embd": 256,
+                                                    "dropout": 0.0, "learning_rate": 6e-4}),
+        "evaluate_model": AsyncMock(return_value={"train_loss": 2.0, "val_loss": 2.2}),
+        "generate_samples": AsyncMock(return_value={"sample_text": "Hello"}),
+    })
+
+    try:
+        result = await run_pipeline(machines, _make_traininglab_context(),
+                                    verbose=False, log_sink=sink)
+        assert result["_final_state"] == "completed"
+    finally:
+        ACTION_REGISTRY.clear()
+        ACTION_REGISTRY.update(original)
+
+    assert len(sink.entries) > 0, "Expected at least one log entry"
+
+    # All entries have required fields
+    for entry in sink.entries:
+        assert "ts" in entry
+        assert "machine" in entry
+        assert "event" in entry
+        assert "from" in entry
+        assert "to" in entry
+        assert "context_delta" in entry
+
+    # TrainingLab transitions are logged
+    tl_entries = [e for e in sink.entries if e["machine"] == "TrainingLab"]
+    assert len(tl_entries) >= 4, "Expected at least 4 TrainingLab transitions"
+
+    tl_events = [e["event"] for e in tl_entries]
+    assert "START" in tl_events
+    assert "DATA_READY" in tl_events
+    assert "TRAINING_DONE" in tl_events
+    assert "EVAL_DONE" in tl_events
+
+    # Each entry's from/to pair makes sense (from != to)
+    for entry in tl_entries:
+        assert entry["from"] != entry["to"], \
+            f"Log entry has same from/to: {entry}"

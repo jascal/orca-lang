@@ -31,6 +31,8 @@ from .parser import parse_orca_md, parse_orca_auto
 
 from .persistence import PersistenceAdapter, FilePersistence
 
+from .logging import LogSink, FileSink, ConsoleSink, MultiSink
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -59,4 +61,9 @@ __all__ = [
     # Persistence
     "PersistenceAdapter",
     "FilePersistence",
+    # Logging
+    "LogSink",
+    "FileSink",
+    "ConsoleSink",
+    "MultiSink",
 ]

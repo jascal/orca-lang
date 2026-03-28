@@ -111,6 +111,19 @@ restored context, which already contains their merged outputs. The nanoGPT
 `train.py` handles its own model checkpointing independently — configure_run
 detects an existing `ckpt.pt` and sets `init_from = resume` automatically.
 
+## logging
+
+| Sink        | Format                                                                  |
+|-------------|-------------------------------------------------------------------------|
+| FileSink    | JSONL — one entry per transition, append-safe for concurrent runs       |
+| ConsoleSink | `[HH:MM:SS] Machine  from → to  (EVENT)  key=val` — human-readable     |
+| MultiSink   | Fan-out — write to multiple sinks simultaneously                        |
+
+One log entry is written per transition across all machines (TrainingLab and
+every invoked child). Each entry includes: `ts`, `run_id`, `machine`, `event`,
+`from`, `to`, and `context_delta` (only fields that changed in that step).
+Inject a sink via the `log_sink` parameter of `run_pipeline`.
+
 ---
 
 # machine DataPipeline
