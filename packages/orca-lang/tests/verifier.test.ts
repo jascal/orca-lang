@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseMachine } from '../src/parser/markdown-parser.js';
-import { checkStructural } from '../src/verifier/structural.js';
+import { checkStructural, analyzeMachine, checkOrphans } from '../src/verifier/structural.js';
 import { checkCompleteness } from '../src/verifier/completeness.js';
 import { checkDeterminism } from '../src/verifier/determinism.js';
 
@@ -549,5 +549,156 @@ describe('Determinism Verifier', () => {
     const result = checkDeterminism(machine);
     expect(result.valid).toBe(true);
     expect(result.errors.filter(e => e.code === 'GUARD_EXHAUSTIVENESS')).toHaveLength(0);
+  });
+});
+
+describe('Effect Verification', () => {
+  const effectsMachineSource = `
+# machine EffectVerify
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| x     | int  | 0       |
+
+## events
+
+- go
+- done
+
+## state idle [initial]
+
+## state working
+
+## state finished [final]
+
+## transitions
+
+| Source  | Event | Guard | Target   | Action    |
+|---------|-------|-------|----------|-----------|
+| idle    | go    |       | working  | do_work   |
+| working | done  |       | finished |           |
+
+## actions
+
+| Name    | Signature                         | Effect      |
+|---------|-----------------------------------|-------------|
+| do_work | \`(ctx) -> Context\`              | WorkRequest |
+
+## effects
+
+| Name        | Input              | Output               |
+|-------------|--------------------|----------------------|
+| WorkRequest | \`{ x: int }\`     | \`{ result: int }\`  |
+`;
+
+  it('no warnings when effects match actions', () => {
+    const machine = parseMachine(effectsMachineSource);
+    const analysis = analyzeMachine(machine);
+    expect(analysis.orphanEffects).toHaveLength(0);
+    const errs = checkOrphans(analysis);
+    expect(errs.filter(e => e.code === 'ORPHAN_EFFECT')).toHaveLength(0);
+    expect(errs.filter(e => e.code === 'UNDECLARED_EFFECT')).toHaveLength(0);
+  });
+
+  it('warns ORPHAN_EFFECT for declared effect not referenced by any action', () => {
+    const machine = parseMachine(`
+# machine OrphanEffect
+
+## events
+
+- go
+
+## state idle [initial]
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target |
+|--------|-------|-------|--------|
+| idle   | go    |       | done   |
+
+## effects
+
+| Name        | Input         | Output          |
+|-------------|---------------|-----------------|
+| UnusedEffect | \`{ a: int }\` | \`{ b: int }\` |
+`);
+    const analysis = analyzeMachine(machine);
+    expect(analysis.orphanEffects).toContain('UnusedEffect');
+    const errs = checkOrphans(analysis);
+    const orphans = errs.filter(e => e.code === 'ORPHAN_EFFECT');
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0].message).toContain('UnusedEffect');
+  });
+
+  it('warns UNDECLARED_EFFECT for action referencing effect not in ## effects', () => {
+    const machine = parseMachine(`
+# machine UndeclaredEffect
+
+## events
+
+- go
+
+## state idle [initial]
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action  |
+|--------|-------|-------|--------|---------|
+| idle   | go    |       | done   | do_work |
+
+## actions
+
+| Name    | Signature             | Effect       |
+|---------|-----------------------|--------------|
+| do_work | \`(ctx) -> Context\`  | GhostRequest |
+
+## effects
+
+| Name        | Input         | Output          |
+|-------------|---------------|-----------------|
+| OtherEffect | \`{ a: int }\` | \`{ b: int }\` |
+`);
+    const analysis = analyzeMachine(machine);
+    const errs = checkOrphans(analysis);
+    const undeclared = errs.filter(e => e.code === 'UNDECLARED_EFFECT');
+    expect(undeclared).toHaveLength(1);
+    expect(undeclared[0].message).toContain('GhostRequest');
+    expect(undeclared[0].message).toContain('do_work');
+  });
+
+  it('skips UNDECLARED_EFFECT check when ## effects section is absent', () => {
+    const machine = parseMachine(`
+# machine NoEffectsSection
+
+## events
+
+- go
+
+## state idle [initial]
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action  |
+|--------|-------|-------|--------|---------|
+| idle   | go    |       | done   | do_work |
+
+## actions
+
+| Name    | Signature             | Effect       |
+|---------|-----------------------|--------------|
+| do_work | \`(ctx) -> Context\`  | AnyEffect    |
+`);
+    expect(machine.effects).toBeUndefined();
+    const analysis = analyzeMachine(machine);
+    const errs = checkOrphans(analysis);
+    expect(errs.filter(e => e.code === 'UNDECLARED_EFFECT')).toHaveLength(0);
   });
 });

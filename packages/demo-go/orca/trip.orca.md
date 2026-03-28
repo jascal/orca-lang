@@ -101,6 +101,13 @@
 | pickup | RIDER_CANCEL | | cancelled | |
 | in_trip | RIDER_CANCEL | | cancelled | |
 
+## effects
+
+| Name         | Input                                                 | Output                  |
+|--------------|-------------------------------------------------------|-------------------------|
+| NotifyRider  | `{ rider_id: string, message: string }`               | `{ delivered: bool }`   |
+| NotifyDriver | `{ driver_id: string, message: string }`              | `{ delivered: bool }`   |
+
 ---
 
 # machine DriverMatching
@@ -296,3 +303,12 @@
 | paying_driver | DRIVER_PAID | | issuing_receipt | |
 | paying_driver | TRANSFER_FAILED | | settlement_error | |
 | issuing_receipt | RECEIPTS_SENT | | settled | |
+
+## effects
+
+| Name          | Input                                                                                  | Output                       |
+|---------------|----------------------------------------------------------------------------------------|------------------------------|
+| CalculateFare | `{ actual_distance: number, actual_duration: number, surge_multiplier: number }`       | `{ final_fare: number }`     |
+| ChargeRider   | `{ pre_auth_id: string, final_fare: number }`                                          | `{ charge_id: string }`      |
+| PayDriver     | `{ driver_id: string, driver_amount: number }`                                         | `{ transfer_id: string }`    |
+| IssueReceipt  | `{ rider_id: string, driver_id: string, final_fare: number }`                          | `{ receipt_id: string }`     |

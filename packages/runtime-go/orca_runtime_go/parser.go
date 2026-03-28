@@ -219,6 +219,7 @@ func parseMachineFromElements(elements []MdElement) (*MachineDef, error) {
 	var transitions []Transition
 	guards := make(map[string]GuardExpression)
 	var actions []ActionSignature
+	var effects []EffectDef
 	var stateEntries []*mdStateEntry
 	var currentEntry *mdStateEntry
 
@@ -239,7 +240,7 @@ func parseMachineFromElements(elements []MdElement) (*MachineDef, error) {
 			// Section heading
 			sectionName := strings.ToLower(e.Text)
 			if sectionName == "context" || sectionName == "events" || sectionName == "transitions" ||
-				sectionName == "guards" || sectionName == "actions" {
+				sectionName == "guards" || sectionName == "actions" || sectionName == "effects" {
 				currentEntry = nil
 				if i+1 < len(elements) {
 					nextEl := elements[i+1]
@@ -359,6 +360,29 @@ func parseMachineFromElements(elements []MdElement) (*MachineDef, error) {
 							i += 2
 							continue
 						}
+					} else if sectionName == "effects" {
+						if table, ok := nextEl.(MdTable); ok {
+							ni := findColumnIndex(table.Headers, "name")
+							ii := findColumnIndex(table.Headers, "input")
+							oi := findColumnIndex(table.Headers, "output")
+							for _, row := range table.Rows {
+								name := ""
+								input := ""
+								output := ""
+								if ni >= 0 && ni < len(row) {
+									name = strings.Trim(strings.TrimSpace(row[ni]), "`")
+								}
+								if ii >= 0 && ii < len(row) {
+									input = strings.TrimSpace(row[ii])
+								}
+								if oi >= 0 && oi < len(row) {
+									output = strings.TrimSpace(row[oi])
+								}
+								effects = append(effects, EffectDef{Name: name, Input: input, Output: output})
+							}
+							i += 2
+							continue
+						}
 					}
 				}
 				i++
@@ -431,6 +455,7 @@ func parseMachineFromElements(elements []MdElement) (*MachineDef, error) {
 		Transitions: transitions,
 		Guards:      guards,
 		Actions:     actions,
+		Effects:     effects,
 	}, nil
 }
 

@@ -53,6 +53,7 @@ Orca is designed to be **runtime-agnostic** - the core language, parser, and ver
 |---------|------|----------|--------|
 | `orca-runtime-python` | `packages/runtime-python` | Python | Functional — async event bus, state machine runtime, effect handlers, markdown parser |
 | `@orca-lang/orca-runtime-ts` | `packages/runtime-ts` | TypeScript | Functional — event bus, OrcaMachine, effect router, markdown parser (not XState-dependent) |
+| `orca-runtime-go` | `packages/runtime-go` | Go | Functional — goroutine event bus, OrcaMachine, guard/action/timeout/parallel/invoke support |
 
 **Demo Applications** (sibling packages in this monorepo)
 
@@ -77,19 +78,23 @@ from orca_runtime_python import parse_orca_auto, OrcaMachine
 import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 ```
 
-**Runtime Feature Parity (both runtime-ts and runtime-python)**
-- ✅ Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — 25 tests per runtime
-- ✅ Plain (non-effect) action execution via `registerAction()` / `register_action()` — 9 tests per runtime
-- ✅ Timeout transitions with auto-cancel on state exit/stop — 9 tests per runtime
-- ✅ Ignored events with parent state inheritance — 8 tests per runtime
-- ✅ Parallel regions with multi-region state values, per-leaf event dispatch, sync strategies — 12-13 tests per runtime
-- ✅ Snapshot/restore with deep-copy semantics and timeout management — 9 tests per runtime
+**Runtime Feature Parity (runtime-ts, runtime-python, runtime-go)**
+- ✅ Guard evaluation for complex expressions (`compare`, `and`, `or`, `not`, `nullcheck`) — 25 tests per runtime (TS/Python)
+- ✅ Plain (non-effect) action execution via `registerAction()` / `register_action()` — 9 tests per runtime (TS/Python)
+- ✅ Timeout transitions with auto-cancel on state exit/stop — 9 tests per runtime (TS/Python)
+- ✅ Ignored events with parent state inheritance — 8 tests per runtime (TS/Python)
+- ✅ Parallel regions with multi-region state values, per-leaf event dispatch, sync strategies — 12-13 tests per runtime (TS/Python)
+- ✅ Snapshot/restore with deep-copy semantics and timeout management — 9 tests per runtime (TS/Python)
+- ✅ `## effects` section parsing + `EffectDef` type/struct — all three runtimes + core language
+- ✅ `OrcaMachine.resume()` / `Resume()` — cold-boot from snapshot without re-running `on_entry` — all three runtimes
+- ✅ `PersistenceAdapter` + `FilePersistence` — atomic save/load/exists — all three runtimes
+- ✅ `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`makeEntry()` — JSONL audit logging — all three runtimes
 
 ### Source Organization
 - **src/parser/ast.ts** - AST type definitions shared across all modules
 - **src/parser/markdown-parser.ts** - Two-phase markdown parser for `.orca.md` format (structural → semantic); produces AST
-- **src/parser/ast-to-markdown.ts** - AST-to-markdown converter for `orca convert` command
-- **src/verifier/structural.ts** - Reachability, deadlock, orphan detection; `analyzeMachine()` builds the `MachineAnalysis` object
+- **src/parser/ast-to-markdown.ts** - AST-to-markdown converter for `orca convert` command; includes `## effects` table output for round-trip fidelity
+- **src/verifier/structural.ts** - Reachability, deadlock, orphan detection; `analyzeMachine()` builds the `MachineAnalysis` object; `ORPHAN_EFFECT` (declared effect unreferenced by any action) and `UNDECLARED_EFFECT` (action effect not in `## effects`, only when section is present) warnings
 - **src/verifier/completeness.ts** - Checks every (state, event) pair is handled or explicitly ignored
 - **src/verifier/determinism.ts** - Checks guards on multi-transition pairs are mutually exclusive; handles negation pairs, complementary comparisons (`<` vs `>=`, `==` vs `!=`), numeric range exclusion, nullcheck vs compare exclusivity, and AND/OR structural analysis
 - **src/verifier/properties.ts** - Property specification & guard-aware bounded model checking: BFS-based reachability, exclusion, pass-through, liveness, bounded response, context invariants (advisory), machine size limit enforcement, statically-false guard pruning
@@ -117,7 +122,7 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 3 | ✅ Complete | Hierarchical states, parallel regions, property specification & guard-aware bounded model checking, snapshot/restore |
 | Phase 3.5 | ✅ Complete | Markdown syntax migration — `.orca.md` format with tables, headers, and lists for LLM-native generation |
 | Phase 4 | ✅ Complete | Machine invocation — `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, cross-machine verifier (cycle detection, child reachability, machine resolution), XState invoke config (`__machine__:Name`), runtime-ts child lifecycle (start on entry, stop on exit, completion events, snapshot/restore), runtime-python port, CLI verify/compile working |
-| Phase 4.5 | 🔄 In progress | Go runtime — `runtime-go` package with core runtime (basic machine, guards, actions, event bus, timeouts, snapshot/restore, invoke parsing), 16 tests passing; demo-go with 5-machine trip.orca.md ([demo design](../../docs/demo-ride-hailing.md)) |
+| Phase 4.5 | ✅ Complete | Go runtime at feature parity with TS/Python; framework features (effects, resume, persistence, logging) ported to all three runtimes + core language; 135 orca-lang / 63 runtime-ts / 69 runtime-python / 16 runtime-go tests |
 | Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-file imports) |
 | Phase 6 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
 
@@ -154,17 +159,16 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - ✅ Runtime-python — ported from runtime-ts, same lifecycle/cancellation/snapshot semantics
 - Key decisions: parent owns child lifecycle (forced stop), input-only context isolation, no recursive invocations, one invoke per state, concurrent invocations via parallel regions
 
-**Phase 4.5 plan — Go Runtime + Ride-Hailing Demo (not started):**
+**Phase 4.5 detail — Go Runtime + Feature Parity (complete):**
 - Design: `docs/demo-ride-hailing.md` — 5-machine trip coordinator demo
-- Step A1: Core Go runtime — markdown parser (`ParseOrcaMd`, `ParseOrcaAuto`), `OrcaMachine` struct, basic state transitions, context. Zero external dependencies.
-- Step A2: Guards + actions — guard evaluation for complex expressions, action registration via `RegisterAction()`
-- Step A3: Event bus — pub/sub, request/response, effect handler registration
-- Step A4: Timeouts — goroutines with `context.Context` cancellation, auto-cancel on state exit/stop
-- Step A5: Hierarchical states + parallel regions — nested states, multi-region state values, sync strategies
-- Step A6: Snapshot/restore — deep-copy state + context, timeout cancellation/restart
-- Step A7: Machine invocation — child lifecycle, input mapping, completion events, forced cancellation, snapshot with children
-- Step B1-B6: Ride-hailing demo — incremental build from 2 machines to 5, interactive CLI with failure mode flags
-- Target: runtime-go at feature parity with runtime-ts/runtime-python, plus the first multi-machine demo
+- ✅ Step A1-A7: Core Go runtime — parser, OrcaMachine, guards, actions, event bus, timeouts, parallel regions, snapshot/restore, invoke parsing; 16 tests
+- ✅ Step B: `demo-go` — 5-machine `trip.orca.md` (TripCoordinator, DriverDispatch, PaymentAuth, TripExecution, FareSettlement); runs FareSettlement end-to-end
+- ✅ Feature parity: `## effects` parsing + `EffectDef` ported to runtime-ts + runtime-go
+- ✅ Feature parity: `OrcaMachine.resume()` / `Resume()` ported to runtime-ts + runtime-go
+- ✅ Feature parity: `PersistenceAdapter` + `FilePersistence` ported to runtime-ts + runtime-go
+- ✅ Feature parity: `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`makeEntry()` ported to runtime-ts + runtime-go
+- ✅ Core language: `## effects` section parsing, `EffectDef` in AST, ast-to-markdown round-trip, `ORPHAN_EFFECT`/`UNDECLARED_EFFECT` verifier warnings, `Effect` column in actions table
+- ✅ Demos updated: demo-ts (`test-game.ts`) and demo-go (`cmd/trip/main.go`) showcase all four new features
 
 ### Skills (LLM-friendly CLI commands)
 

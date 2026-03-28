@@ -107,6 +107,14 @@
 | can_examine     | `true`                        |
 | llm_call_succeeded | `true`                    |
 
+## effects
+
+| Name              | Input                                                             | Output                                   |
+|-------------------|-------------------------------------------------------------------|------------------------------------------|
+| NarrativeRequest  | `{ location: string, command: string, inventory: string[] }`     | `{ narrative: string }`                  |
+| SaveRequest       | `{ session_id: string, state: string, context: object }`         | `{ saved: bool, slot: string }`          |
+| LoadRequest       | `{ session_id: string }`                                         | `{ context: object, found: bool }`       |
+
 ## actions
 
 | Name               | Signature                      | Effect                        |

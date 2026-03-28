@@ -612,3 +612,100 @@ describe('Round-trip: Markdown → AST → Markdown → AST (idempotency)', () =
     expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
 });
+
+describe('## effects section', () => {
+  it('parses effects table', () => {
+    const machine = parseMachine(`
+# machine EffectsTest
+
+## state idle [initial]
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target |
+|--------|-------|-------|--------|
+| idle   | go    |       | done   |
+
+## events
+
+- go
+
+## effects
+
+| Name            | Input                          | Output                |
+|-----------------|--------------------------------|-----------------------|
+| NarrativeRequest | \`{ location: string }\`      | \`{ narrative: string }\` |
+| SaveRequest     | \`{ session_id: string }\`     | \`{ saved: bool }\`   |
+`);
+    expect(machine.effects).toBeDefined();
+    expect(machine.effects).toHaveLength(2);
+    expect(machine.effects![0]).toEqual({
+      name: 'NarrativeRequest',
+      input: '`{ location: string }`',
+      output: '`{ narrative: string }`',
+    });
+    expect(machine.effects![1].name).toBe('SaveRequest');
+  });
+
+  it('sets effects to undefined when ## effects section is absent', () => {
+    const machine = parseMachine(`
+# machine NoEffects
+
+## state idle [initial]
+
+## state done [final]
+
+## events
+
+- go
+
+## transitions
+
+| Source | Event | Guard | Target |
+|--------|-------|-------|--------|
+| idle   | go    |       | done   |
+`);
+    expect(machine.effects).toBeUndefined();
+  });
+
+  it('round-trips machine with effects', () => {
+    const source = `# machine WithEffects
+
+## events
+
+- go
+
+## state idle [initial]
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target |
+|--------|-------|-------|--------|
+| idle   | go    |       | done   |
+
+## actions
+
+| Name    | Signature      |
+|---------|----------------|
+| do_work | \`(ctx) -> Context\` |
+
+## effects
+
+| Name        | Input               | Output              |
+|-------------|---------------------|---------------------|
+| WorkRequest | \`{ id: string }\`  | \`{ result: string }\` |
+`;
+    const first = parseMachine(source);
+    const md2 = machineToMarkdown(first);
+    expect(md2).toContain('## effects');
+    expect(md2).toContain('WorkRequest');
+    const second = parseMachine(md2);
+    expect(second.effects).toBeDefined();
+    expect(second.effects).toHaveLength(1);
+    expect(second.effects![0].name).toBe('WorkRequest');
+  });
+});

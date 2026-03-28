@@ -144,6 +144,38 @@ export class OrcaMachine {
     }
   }
 
+  /**
+   * Cold-boot from a snapshot without re-running on_entry handlers.
+   * Use this to resume a previously persisted run.
+   * Distinct from restore() which operates on a live machine.
+   */
+  async resume(snap: { state: string | Record<string, unknown>; context: Record<string, unknown> }): Promise<void> {
+    if (this.active) return;
+
+    this.state = new StateValue(
+      typeof snap.state === 'string'
+        ? snap.state
+        : JSON.parse(JSON.stringify(snap.state))
+    );
+    this.context = JSON.parse(JSON.stringify(snap.context));
+    this.active = true;
+
+    await this.eventBus.publish({
+      type: "orca.machine.started",
+      source: this.definition.name,
+      timestamp: new Date(),
+      payload: {
+        machine: this.definition.name,
+        initial_state: this.state.toString(),
+        resumed: true,
+      },
+    });
+
+    for (const leaf of this.state.leaves()) {
+      this.startTimeoutForState(leaf);
+    }
+  }
+
   async start(): Promise<void> {
     if (this.active) {
       return;

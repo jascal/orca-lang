@@ -60,6 +60,12 @@ export interface ActionSignature {
   effectType?: string;
 }
 
+export interface EffectDef {
+  name: string;
+  input: string;
+  output: string;
+}
+
 export interface MachineDef {
   name: string;
   context: Context;
@@ -68,6 +74,7 @@ export interface MachineDef {
   transitions: Transition[];
   guards: Record<string, GuardExpression>;
   actions: ActionSignature[];
+  effects: EffectDef[];
 }
 
 export type GuardExpression =

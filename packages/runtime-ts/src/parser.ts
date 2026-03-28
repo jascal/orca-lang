@@ -17,6 +17,7 @@ import type {
   SyncStrategy,
   ActionSignature,
   InvokeDef,
+  EffectDef,
 } from "./types.js";
 import { StateValue } from "./types.js";
 
@@ -547,6 +548,7 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
   const transitions: Transition[] = [];
   const guards: Record<string, GuardExpression> = {};
   const actions: ActionSignature[] = [];
+  const effects: EffectDef[] = [];
   const stateEntries: MdStateEntry[] = [];
   let currentStateEntry: MdStateEntry | null = null;
 
@@ -563,7 +565,7 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
 
       // Section headings
       const sectionName = el.text.toLowerCase();
-      if (['context', 'events', 'transitions', 'guards', 'actions'].includes(sectionName)) {
+      if (['context', 'events', 'transitions', 'guards', 'actions', 'effects'].includes(sectionName)) {
         currentStateEntry = null;
         const nextEl = elements[i + 1];
 
@@ -630,6 +632,18 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
             ));
           }
           i++;
+        } else if (sectionName === 'effects' && nextEl?.kind === 'table') {
+          const ni = findColumnIndex(nextEl.headers, 'name');
+          const ii = findColumnIndex(nextEl.headers, 'input');
+          const oi = findColumnIndex(nextEl.headers, 'output');
+          for (const row of nextEl.rows) {
+            effects.push({
+              name: stripBackticks(row[ni]?.trim() || ''),
+              input: stripBackticks(row[ii]?.trim() || ''),
+              output: stripBackticks(row[oi]?.trim() || ''),
+            });
+          }
+          i++;
         }
         continue;
       }
@@ -674,7 +688,7 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
   const baseLevel = stateEntries.length > 0 ? stateEntries[0].level : 2;
   const states = buildMdStatesAtLevel(stateEntries, 0, baseLevel).states;
 
-  return { name: machineName, context, events, states, transitions, guards, actions };
+  return { name: machineName, context, events, states, transitions, guards, actions, effects };
 }
 
 /**

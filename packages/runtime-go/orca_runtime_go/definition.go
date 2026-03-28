@@ -61,6 +61,13 @@ type ActionSignature struct {
 	EffectType string
 }
 
+// EffectDef represents a named effect declared in the ## effects section.
+type EffectDef struct {
+	Name   string
+	Input  string
+	Output string
+}
+
 // MachineDef represents a complete Orca machine definition.
 type MachineDef struct {
 	Name        string
@@ -70,6 +77,7 @@ type MachineDef struct {
 	Transitions []Transition
 	Guards      map[string]GuardExpression
 	Actions     []ActionSignature
+	Effects     []EffectDef
 }
 
 // GuardExpression union types

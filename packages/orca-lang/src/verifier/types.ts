@@ -34,6 +34,7 @@ export interface MachineAnalysis {
   finalStates: StateDef[];
   orphanEvents: string[];
   orphanActions: string[];
+  orphanEffects: string[];
 }
 
 export interface FileAnalysis {

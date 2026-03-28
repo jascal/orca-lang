@@ -209,6 +209,14 @@ export function analyzeMachine(machine: MachineDef): MachineAnalysis {
   const orphanEvents = machine.events.filter(e => !usedEvents.has(e.name)).map(e => e.name);
   const orphanActions = machine.actions.filter(a => !usedActions.has(a.name)).map(a => a.name);
 
+  // Orphan effects: declared in ## effects but no action references them via effectType
+  const usedEffectTypes = new Set<string>(
+    machine.actions.filter(a => a.hasEffect && a.effectType).map(a => a.effectType!)
+  );
+  const orphanEffects = machine.effects
+    ? machine.effects.filter(e => !usedEffectTypes.has(e.name)).map(e => e.name)
+    : [];
+
   return {
     machine,
     stateMap,
@@ -216,6 +224,7 @@ export function analyzeMachine(machine: MachineDef): MachineAnalysis {
     finalStates,
     orphanEvents,
     orphanActions,
+    orphanEffects,
   };
 }
 
@@ -391,6 +400,31 @@ export function checkOrphans(analysis: MachineAnalysis): VerificationError[] {
       severity: 'warning',
       suggestion: `Reference '${action}' in a transition or remove it from the actions declaration`,
     });
+  }
+
+  for (const effect of analysis.orphanEffects) {
+    errors.push({
+      code: 'ORPHAN_EFFECT',
+      message: `Effect '${effect}' is declared but never referenced by any action`,
+      severity: 'warning',
+      suggestion: `Reference '${effect}' in an action signature or remove it from the effects declaration`,
+    });
+  }
+
+  // Undeclared effects: actions reference an effectType not in ## effects
+  // Only checked when the ## effects section is explicitly present
+  if (analysis.machine.effects !== undefined) {
+    const declaredEffects = new Set(analysis.machine.effects.map(e => e.name));
+    for (const action of analysis.machine.actions) {
+      if (action.hasEffect && action.effectType && !declaredEffects.has(action.effectType)) {
+        errors.push({
+          code: 'UNDECLARED_EFFECT',
+          message: `Action '${action.name}' references effect '${action.effectType}' which is not declared in ## effects`,
+          severity: 'warning',
+          suggestion: `Add '${action.effectType}' to the ## effects section or remove the effect reference`,
+        });
+      }
+    }
   }
 
   return errors;

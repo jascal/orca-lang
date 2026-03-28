@@ -168,6 +168,12 @@ export interface ActionSignature {
   effectType?: string;
 }
 
+export interface EffectDef {
+  name: string;
+  input: string;   // free-form description of input shape
+  output: string;  // free-form description of output shape
+}
+
 // Property types for bounded model checking
 
 export interface ReachabilityProperty {
@@ -215,6 +221,7 @@ export interface MachineDef {
   transitions: Transition[];
   guards: GuardDef[];
   actions: ActionSignature[];
+  effects?: EffectDef[];     // declared in ## effects section; undefined if section absent
   properties?: Property[];
 }
 

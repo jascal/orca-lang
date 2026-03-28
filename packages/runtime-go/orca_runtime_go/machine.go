@@ -879,6 +879,46 @@ func (m *OrcaMachine) Snapshot() map[string]any {
 	}
 }
 
+// Resume cold-boots the machine from a snapshot without re-running on_entry handlers.
+// Use this to resume a previously persisted run. Distinct from Restore, which operates
+// on a live machine.
+func (m *OrcaMachine) Resume(snap map[string]any) error {
+	m.mu.Lock()
+	if m.active {
+		m.mu.Unlock()
+		return nil
+	}
+
+	if v, ok := snap["state"]; ok {
+		m.state = NewStateValue(v)
+	}
+	if v, ok := snap["context"]; ok {
+		if ctx, ok := v.(map[string]any); ok {
+			m.context = ctx
+		}
+	}
+
+	m.active = true
+	leaves := m.state.Leaves()
+	m.mu.Unlock()
+
+	m.eventBus.Publish(Event{
+		Type:   EventTypeMachineStarted,
+		Source: m.definition.Name,
+		Payload: map[string]any{
+			"machine":       m.definition.Name,
+			"initial_state": m.state.String(),
+			"resumed":       true,
+		},
+	})
+
+	for _, leaf := range leaves {
+		m.startTimeoutForState(leaf)
+	}
+
+	return nil
+}
+
 // Restore restores machine state from a snapshot.
 func (m *OrcaMachine) Restore(snap map[string]any) error {
 	m.mu.Lock()

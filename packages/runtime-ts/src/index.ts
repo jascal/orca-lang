@@ -16,6 +16,7 @@ export type {
   Effect,
   EffectResult,
   EffectStatus,
+  EffectDef,
 } from "./types.js";
 
 export { StateValue } from "./types.js";
@@ -34,3 +35,11 @@ export type { TransitionCallback, TransitionResult, ActionHandler } from "./mach
 
 // Parser
 export { parseOrcaMd, parseOrcaAuto, ParseError } from "./parser.js";
+
+// Persistence
+export type { PersistenceAdapter } from "./persistence.js";
+export { FilePersistence } from "./persistence.js";
+
+// Logging
+export type { LogSink, LogEntry } from "./logging.js";
+export { FileSink, ConsoleSink, MultiSink, makeEntry } from "./logging.js";

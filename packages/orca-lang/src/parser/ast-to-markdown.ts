@@ -4,7 +4,7 @@
 import {
   MachineDef, ContextField, StateDef, Transition,
   GuardDef, GuardExpression, ActionSignature, Property,
-  Type, ValueRef, ParallelDef,
+  Type, ValueRef, ParallelDef, EffectDef,
 } from './ast.js';
 
 function typeToString(type: Type): string {
@@ -196,6 +196,15 @@ export function machineToMarkdown(machine: MachineDef): string {
     lines.push('');
     const rows = machine.actions.map(a => [a.name, `\`${actionSignatureToString(a)}\``]);
     lines.push(...formatTable(['Name', 'Signature'], rows));
+    lines.push('');
+  }
+
+  // Effects
+  if (machine.effects && machine.effects.length > 0) {
+    lines.push('## effects');
+    lines.push('');
+    const rows = machine.effects.map(e => [e.name, e.input, e.output]);
+    lines.push(...formatTable(['Name', 'Input', 'Output'], rows));
     lines.push('');
   }
 

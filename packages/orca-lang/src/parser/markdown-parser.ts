@@ -4,7 +4,7 @@
 
 import {
   ParseResult, MachineDef, OrcaFile, ContextField, EventDef, StateDef,
-  Transition, GuardDef, GuardExpression, ActionSignature,
+  Transition, GuardDef, GuardExpression, ActionSignature, EffectDef,
   ParallelDef, RegionDef, SyncStrategy, Property, Type,
   GuardRef, VariableRef, ValueRef, ComparisonOp,
   ReachabilityProperty, PassesThroughProperty, RespondsProperty,
@@ -589,9 +589,19 @@ function parseGuardsTable(table: MdTable): GuardDef[] {
 function parseActionsTable(table: MdTable): ActionSignature[] {
   const ni = findColumnIndex(table.headers, 'name');
   const si = findColumnIndex(table.headers, 'signature');
-  return table.rows.map(row =>
-    parseActionSignatureFromString(row[ni]?.trim() || '', stripBackticks(row[si]?.trim() || ''))
-  );
+  const ei = findColumnIndex(table.headers, 'effect');  // optional separate column
+  return table.rows.map(row => {
+    const action = parseActionSignatureFromString(row[ni]?.trim() || '', stripBackticks(row[si]?.trim() || ''));
+    // If a separate Effect column exists and signature didn't already embed an effect
+    if (ei >= 0 && !action.hasEffect) {
+      const effectName = row[ei]?.trim() || '';
+      if (effectName) {
+        action.hasEffect = true;
+        action.effectType = effectName;
+      }
+    }
+    return action;
+  });
 }
 
 // --- State Hierarchy Builder ---
@@ -689,6 +699,7 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
   let transitions: Transition[] = [];
   let guards: GuardDef[] = [];
   let actions: ActionSignature[] = [];
+  let effects: EffectDef[] | undefined;
   let properties: Property[] | undefined;
   const stateEntries: StateEntry[] = [];
   let currentStateEntry: StateEntry | null = null;
@@ -706,7 +717,7 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
 
       // Non-state section headings
       const sectionName = el.text.toLowerCase();
-      if (['context', 'events', 'transitions', 'guards', 'actions', 'properties'].includes(sectionName)) {
+      if (['context', 'events', 'transitions', 'guards', 'actions', 'effects', 'properties'].includes(sectionName)) {
         currentStateEntry = null;
         const nextEl = elements[i + 1];
 
@@ -720,6 +731,8 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
           guards = parseGuardsTable(nextEl); i++;
         } else if (sectionName === 'actions' && nextEl?.kind === 'table') {
           actions = parseActionsTable(nextEl); i++;
+        } else if (sectionName === 'effects' && nextEl?.kind === 'table') {
+          effects = parseEffectsTable(nextEl); i++;
         } else if (sectionName === 'properties' && nextEl?.kind === 'bullets') {
           properties = parsePropertiesList(nextEl); i++;
         }
@@ -768,6 +781,7 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
   const states = buildStatesAtLevel(stateEntries, 0, baseLevel).states;
 
   const machine: MachineDef = { name: machineName, context, events, states, transitions, guards, actions };
+  if (effects !== undefined) machine.effects = effects;
   if (properties && properties.length > 0) machine.properties = properties;
   return machine;
 }
@@ -793,6 +807,17 @@ function parseMarkdownSemantic(elements: MdElement[]): MachineDef[] {
 
   // Parse each chunk as a separate machine
   return chunks.map(chunk => parseMachineFromElements(chunk));
+}
+
+function parseEffectsTable(table: MdTable): EffectDef[] {
+  const ni = findColumnIndex(table.headers, 'name');
+  const ii = findColumnIndex(table.headers, 'input');
+  const oi = findColumnIndex(table.headers, 'output');
+  return table.rows.map(row => ({
+    name: stripBackticks((ni >= 0 ? row[ni] : '') || '').trim(),
+    input: ((ii >= 0 ? row[ii] : '') || '').trim(),
+    output: ((oi >= 0 ? row[oi] : '') || '').trim(),
+  })).filter(e => e.name !== '');
 }
 
 function parsePropertiesList(list: MdBulletList): Property[] {
