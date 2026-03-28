@@ -141,7 +141,14 @@ jobs:
         working-directory: packages/runtime-python
 
       - name: Publish
-        run: twine upload dist/*
+        run: |
+          PKG="orca-runtime-python"
+          VER=$(python -c "import tomllib; d=tomllib.load(open('pyproject.toml','rb')); print(d['project']['version'])")
+          if pip index versions "${PKG}" 2>/dev/null | grep -q "${VER}"; then
+            echo "Already published ${PKG}==${VER}, skipping"
+          else
+            twine upload dist/*
+          fi
         working-directory: packages/runtime-python
         env:
           TWINE_USERNAME: __token__
