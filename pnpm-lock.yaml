@@ -10,7 +10,7 @@ importers:
 
   packages/demo-ts:
     dependencies:
-      '@orca-lang/orca-runtime-ts':
+      '@orcalang/orca-runtime-ts':
         specifier: workspace:*
         version: link:../runtime-ts
       dotenv:

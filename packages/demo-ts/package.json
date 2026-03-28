@@ -9,7 +9,7 @@
     "debug": "tsx src/debug-compile.ts"
   },
   "dependencies": {
-    "@orca-lang/orca-runtime-ts": "workspace:*",
+    "@orcalang/orca-runtime-ts": "workspace:*",
     "dotenv": "^17.3.1",
     "js-yaml": "^4.1.1",
     "nanoid": "^5.0.9",

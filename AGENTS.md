@@ -29,10 +29,10 @@ All tools accept `source: string` — raw `.orca.md` content. No files required.
 ### MCP Server (recommended for modern agent frameworks)
 
 ```bash
-npm install -g @orca-lang/orca-mcp-server
+npm install -g @orcalang/orca-mcp-server
 
 # Or run directly with npx
-npx @orca-lang/orca-mcp-server
+npx @orcalang/orca-mcp-server
 ```
 
 Configure in your MCP host (e.g. Claude Desktop `claude_desktop_config.json`):
@@ -42,7 +42,7 @@ Configure in your MCP host (e.g. Claude Desktop `claude_desktop_config.json`):
   "mcpServers": {
     "orca": {
       "command": "npx",
-      "args": ["@orca-lang/orca-mcp-server"],
+      "args": ["@orcalang/orca-mcp-server"],
       "env": {
         "ANTHROPIC_API_KEY": "..."
       }
@@ -285,10 +285,10 @@ orca /parse-machine multi-machine.orca.md
 
 After generating and compiling a machine, you connect it to your business logic by registering action handlers.
 
-### TypeScript (`@orca-lang/orca-runtime-ts`)
+### TypeScript (`@orcalang/orca-runtime-ts`)
 
 ```typescript
-import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts';
+import { parseOrcaAuto, OrcaMachine } from '@orcalang/orca-runtime-ts';
 
 const { file } = parseOrcaAuto(source);
 const machine = new OrcaMachine(file.machines[0]);

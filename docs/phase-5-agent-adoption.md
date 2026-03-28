@@ -24,7 +24,7 @@ The work divides into three tracks that can proceed in parallel:
 
 ### What doesn't work (for external agent adoption)
 - `npm install orca` → package not published
-- `npm install @orca-lang/orca-runtime-ts` → package not published
+- `npm install @orcalang/orca-runtime-ts` → package not published
 - `pip install orca-runtime-python` → package not published
 - `go get orca-runtime-go/...` → module path is not a VCS URL, can't be resolved
 - Every skill takes a file path — agents work with strings in memory
@@ -97,7 +97,7 @@ Update all internal imports and demo-go references accordingly.
 
 An MCP (Model Context Protocol) server that exposes Orca skills as agent tools. Agents connect via stdio (same process) or SSE (HTTP). No files required — all inputs and outputs are strings.
 
-**Package**: `@orca-lang/orca-mcp-server`
+**Package**: `@orcalang/orca-mcp-server`
 
 **Tools exposed:**
 
@@ -330,7 +330,7 @@ C6 (error catalog)   ──> C7 (AGENTS.md)     [independent, can start anytime]
 Phase 5 is complete when:
 
 - [ ] `npm install orca` installs the CLI and library
-- [ ] `npm install @orca-lang/orca-runtime-ts` installs the TypeScript runtime
+- [ ] `npm install @orcalang/orca-runtime-ts` installs the TypeScript runtime
 - [ ] `pip install orca-runtime-python` installs the Python runtime
 - [ ] `go get github.com/jascal/orca-lang/packages/runtime-go` works
 - [ ] The MCP server is published and an agent can connect and call all 6 tools (including `/parse-machine`) with string inputs — no files

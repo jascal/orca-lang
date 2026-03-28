@@ -1,6 +1,6 @@
 // Effect handlers for retro-adventure Orca runtime
 
-import type { Effect, EffectResult } from '@orca-lang/orca-runtime-ts';
+import type { Effect, EffectResult } from '@orcalang/orca-runtime-ts';
 
 // Narrative request effect - calls LLM for game narration
 export interface NarrativeRequest {

@@ -105,7 +105,7 @@ The verifier checks this before anything runs: reachability, deadlocks, guard de
 - Mermaid `stateDiagram-v2`
 
 **Runtimes** (standalone — no XState dependency)
-- TypeScript (`@orca-lang/orca-runtime-ts`)
+- TypeScript (`@orcalang/orca-runtime-ts`)
 - Python (`orca-runtime-python`)
 - Go (`orca-runtime-go`)
 
@@ -236,7 +236,7 @@ await machine.resume(snap);
 ### Structured logging
 
 ```typescript
-import { MultiSink, FileSink, ConsoleSink, makeEntry } from '@orca-lang/orca-runtime-ts';
+import { MultiSink, FileSink, ConsoleSink, makeEntry } from '@orcalang/orca-runtime-ts';
 
 const sink = new MultiSink(new ConsoleSink(), new FileSink('audit.jsonl'));
 
@@ -254,7 +254,7 @@ const m = new OrcaMachine(def, bus, {
 ### TypeScript
 
 ```typescript
-import { parseOrcaAuto, OrcaMachine, EventBus } from '@orca-lang/orca-runtime-ts';
+import { parseOrcaAuto, OrcaMachine, EventBus } from '@orcalang/orca-runtime-ts';
 
 const def = parseOrcaAuto(source);
 const bus = new EventBus();

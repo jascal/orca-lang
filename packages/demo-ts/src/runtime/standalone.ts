@@ -17,11 +17,11 @@ export {
   resetEventBus,
   EventType,
   createEffectRouter,
-} from '@orca-lang/orca-runtime-ts';
+} from '@orcalang/orca-runtime-ts';
 
 export type {
   Event,
   EventHandler,
   TransitionResult,
   TransitionCallback,
-} from '@orca-lang/orca-runtime-ts';
+} from '@orcalang/orca-runtime-ts';

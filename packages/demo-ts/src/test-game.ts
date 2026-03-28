@@ -13,7 +13,7 @@ import {
   MultiSink,
   makeEntry,
   FilePersistence,
-} from '@orca-lang/orca-runtime-ts';
+} from '@orcalang/orca-runtime-ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

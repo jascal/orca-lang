@@ -1,5 +1,5 @@
 {
-  "name": "@orca-lang/orca-runtime-ts",
+  "name": "@orcalang/orca-runtime-ts",
   "version": "0.1.0",
   "description": "TypeScript async runtime for Orca state machines",
   "type": "module",

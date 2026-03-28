@@ -1,16 +1,16 @@
 /**
  * Orca compatibility shim
  *
- * Wraps @orca-lang/orca-runtime-ts to provide the same interface
+ * Wraps @orcalang/orca-runtime-ts to provide the same interface
  * as the full orca language package (tokenize, parse, createOrcaMachine).
  */
 
-import { parseOrcaAuto, OrcaMachine, EventBus, getEventBus, resetEventBus, EventType, createEffectRouter } from '@orca-lang/orca-runtime-ts';
-import type { MachineDef } from '@orca-lang/orca-runtime-ts';
+import { parseOrcaAuto, OrcaMachine, EventBus, getEventBus, resetEventBus, EventType, createEffectRouter } from '@orcalang/orca-runtime-ts';
+import type { MachineDef } from '@orcalang/orca-runtime-ts';
 
 // Re-export types and runtime components
 export { OrcaMachine, EventBus, getEventBus, resetEventBus, EventType, createEffectRouter };
-export type { MachineDef, Event, TransitionCallback, TransitionResult } from '@orca-lang/orca-runtime-ts';
+export type { MachineDef, Event, TransitionCallback, TransitionResult } from '@orcalang/orca-runtime-ts';
 
 // Tokenize - returns source as-is (preserving structure for parser)
 export function tokenize(source: string): string {

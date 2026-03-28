@@ -86,7 +86,7 @@ The core language package. See `packages/orca-lang/CLAUDE.md` for detailed archi
 - **LLM integration**: Anthropic, OpenAI, Grok, Ollama providers
 - **CLI skills**: `/generate-orca`, `/verify-orca`, `/compile-orca`, `/generate-actions`, `/refine-orca`
 
-### packages/runtime-ts (@orca-lang/orca-runtime-ts)
+### packages/runtime-ts (@orcalang/orca-runtime-ts)
 Standalone TypeScript runtime (not XState-dependent). Event bus with pub/sub and request/response, OrcaMachine class, effect router, markdown parser with auto-detection. Features: `## effects` section parsing (`EffectDef`), `OrcaMachine.resume()` (cold-boot from snapshot), `PersistenceAdapter` + `FilePersistence` (atomic JSONL), `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`makeEntry()`.
 
 ### packages/runtime-python (orca-runtime-python)
@@ -96,7 +96,7 @@ Standalone Python async runtime. Zero external dependencies. Async event bus, Or
 Standalone Go runtime. Zero external dependencies. Goroutine-based event bus, OrcaMachine struct, guard evaluation, action registration, timeout management, snapshot/restore, machine invocation parsing. Features: `## effects` section parsing (`EffectDef`), `OrcaMachine.Resume()`, `PersistenceAdapter` + `FilePersistence`, `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`MakeEntry()`. 16 tests.
 
 ### packages/demo-ts (orca-demo-ts)
-Playable text adventure game. Interactive CLI, 8-state machine, world map with 4 locations, inventory system, score tracking, LLM narrative generation path. Showcases `## effects` parsing, `MultiSink` audit logging, `FilePersistence` snapshot/checkpoint, and `OrcaMachine.resume()`. Depends on `@orca-lang/orca-runtime-ts` via pnpm workspace.
+Playable text adventure game. Interactive CLI, 8-state machine, world map with 4 locations, inventory system, score tracking, LLM narrative generation path. Showcases `## effects` parsing, `MultiSink` audit logging, `FilePersistence` snapshot/checkpoint, and `OrcaMachine.resume()`. Depends on `@orcalang/orca-runtime-ts` via pnpm workspace.
 
 ### packages/demo-python (orca-demo-python)
 Agent framework demo with 4 scenarios: order processing (8-state workflow), multi-agent task orchestration, event bus request/response, and parsed Orca machine.

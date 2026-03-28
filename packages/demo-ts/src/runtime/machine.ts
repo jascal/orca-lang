@@ -3,7 +3,7 @@
 
 import { createActor, fromCallback } from 'xstate';
 import type { Actor, AnyActor, AnyStateMachine } from 'xstate';
-import type { Effect, EffectResult } from '@orca-lang/orca-runtime-ts';
+import type { Effect, EffectResult } from '@orcalang/orca-runtime-ts';
 
 export interface EffectHandlers {
   [effectType: string]: (effect: Effect<unknown>) => Promise<EffectResult<unknown>>;

@@ -1,6 +1,6 @@
 // Concrete effect handler implementations
 
-import type { Effect, EffectResult } from '@orca-lang/orca-runtime-ts';
+import type { Effect, EffectResult } from '@orcalang/orca-runtime-ts';
 import { WORLD, describeLocation, getLocation } from './world';
 import type {
   NarrativeRequest,

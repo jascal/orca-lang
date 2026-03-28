@@ -52,7 +52,7 @@ Orca is designed to be **runtime-agnostic** - the core language, parser, and ver
 | Package | Path | Language | Status |
 |---------|------|----------|--------|
 | `orca-runtime-python` | `packages/runtime-python` | Python | Functional — async event bus, state machine runtime, effect handlers, markdown parser |
-| `@orca-lang/orca-runtime-ts` | `packages/runtime-ts` | TypeScript | Functional — event bus, OrcaMachine, effect router, markdown parser (not XState-dependent) |
+| `@orcalang/orca-runtime-ts` | `packages/runtime-ts` | TypeScript | Functional — event bus, OrcaMachine, effect router, markdown parser (not XState-dependent) |
 | `orca-runtime-go` | `packages/runtime-go` | Go | Functional — goroutine event bus, OrcaMachine, guard/action/timeout/parallel/invoke support |
 
 **Demo Applications** (sibling packages in this monorepo)
@@ -75,7 +75,7 @@ Orca is designed to be **runtime-agnostic** - the core language, parser, and ver
 from orca_runtime_python import parse_orca_auto, OrcaMachine
 
 # TypeScript runtime
-import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
+import { parseOrcaAuto, OrcaMachine } from '@orcalang/orca-runtime-ts'
 ```
 
 **Runtime Feature Parity (runtime-ts, runtime-python, runtime-go)**
@@ -174,7 +174,7 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - Design: `docs/phase-5-agent-adoption.md`
 - Three parallel tracks:
   - **Track A — Distribution**: A1 fix Go module path (`github.com/jascal/orca-lang/packages/runtime-go`), A2 npm `files` + prepublish build, A3 GitHub Actions release workflow (npm + PyPI + Go tag), A4 CHANGELOG + v0.1.0 tag
-  - **Track B — MCP Server**: B1 `packages/mcp-server` (`@orca-lang/orca-mcp-server`) exposing 6 tools via MCP stdio/SSE — all accept `source: string` not file paths, B2 `--stdin` flag on all CLI commands, B3 `orca --tools --json` self-description
+  - **Track B — MCP Server**: B1 `packages/mcp-server` (`@orcalang/orca-mcp-server`) exposing 6 tools via MCP stdio/SSE — all accept `source: string` not file paths, B2 `--stdin` flag on all CLI commands, B3 `orca --tools --json` self-description
   - **Track C — Skill Completeness**: C1 refactor skills to accept `source` strings (pre-req for MCP), C2 `/parse-machine` skill (AST as JSON), C3 `/generate-actions` for Python + Go, C4 `/generate-orca-multi` (multi-machine from one spec, cross-machine verified), C5 loop `/refine-orca` to convergence, C6 error catalog (`docs/error-catalog.md` — all 19 error codes), C7 `AGENTS.md` (external agent integration guide)
 - Recommended order: C1 → B1 → [B2, C2, C3, C4, C5 in parallel] → B3 → C6 → C7 → A1+A2 → A3 → A4
 
