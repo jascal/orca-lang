@@ -11,6 +11,7 @@
     "test:demo-python": ".venv/bin/python packages/demo-python/demo.py",
     "setup:python": "bash scripts/setup-python.sh",
     "test:demo-nanolab": ".venv/bin/python -m pytest packages/demo-nanolab/tests/ -v",
+    "run:demo-nanolab": ".venv/bin/python -m nanolab --max-iters 100",
     "setup:go": "cd packages/runtime-go && go mod download && cd ../demo-go && go mod download",
     "build:demo-go": "cd packages/demo-go && go build -o trip ./cmd/trip",
     "test:demo-go": "cd packages/demo-go && ./trip",

@@ -60,6 +60,9 @@ pnpm run test:demo-go
 # Run nanolab demo tests (machine parsing + pipeline logic, no torch required)
 pnpm run test:demo-nanolab
 
+# Run nanolab demo pipeline (requires torch for actual training)
+pnpm run run:demo-nanolab
+
 # Interactive text adventure
 cd packages/demo-ts && pnpm run cli
 
@@ -96,7 +99,7 @@ Playable text adventure game. Interactive CLI, 8-state machine, world map with 4
 Agent framework demo with 4 scenarios: order processing (8-state workflow), multi-agent task orchestration, event bus request/response, and parsed Orca machine.
 
 ### packages/demo-nanolab (orca-demo-nanolab)
-nanoGPT training orchestrator. 4-machine architecture in a single `.orca.md` file (separated by `---`): TrainingLab (orchestrator with `invoke:` states), DataPipeline (data check/download), TrainingRun (configure + train), Evaluator (eval + generate). Recursive multi-machine driver in `driver.py` handles child invocations and context merging. Vendors nanoGPT's `train.py`/`model.py`/`sample.py`. Declares `## effects` section. Requires `torch` for actual training; 15 smoke tests run without it. Design doc: `docs/demo-nanolab.md`.
+nanoGPT training orchestrator. 5-machine architecture in a single `.orca.md` file (separated by `---`): TrainingLab (coordinator), DataPipeline, HyperSearch (parallel trial regions), TrainingRun, Evaluator. Recursive multi-machine driver with context merging and parallel dispatch via `asyncio.gather`. Vendors nanoGPT's `train.py`/`model.py`/`sample.py`. Features: pluggable persistence (`FilePersistence`, `--persist`), structured JSONL audit logging (`FileSink`, `--log`), rich terminal display, LLM workflow refinement (`--refine`). Requires `torch` for actual training; 47 tests run without it. Design doc: `docs/demo-nanolab.md`.
 
 ## Cross-Package Dependencies
 
@@ -119,7 +122,7 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 
 **Phase 4.5 In Progress**: Go runtime — `runtime-go` package with core runtime (machine, guards, actions, event bus, timeouts, snapshot/restore, invoke parsing), 16 tests passing; `demo-go` with 5-machine `trip.orca.md` definition. Design doc: `docs/demo-ride-hailing.md`.
 
-**Phase 5 (nanolab) In Progress**: demo-nanolab — nanoGPT training orchestrator. Phase 1 complete (single TrainingLab machine, 6 effect handlers). Phase 2 complete (`## effects` section in Python parser + `EffectDef` type, 69 runtime-python tests). Phase 3 complete: 4-machine architecture — TrainingLab orchestrates DataPipeline, TrainingRun, Evaluator via `invoke:` states; recursive multi-machine driver with context merging; runtime fix to call on_entry handlers without requiring `## actions` declaration; 15 smoke tests. Next: persistence (Phase 5), logging (Phase 6). Design doc: `docs/demo-nanolab.md`.
+**Phase 5 (nanolab) Complete**: demo-nanolab — all 8 phases shipped. 5-machine orchestrator (TrainingLab, DataPipeline, HyperSearch with parallel regions, TrainingRun, Evaluator). Framework features driven by this demo: `## effects` section in Python parser (`EffectDef`), pluggable `PersistenceAdapter` + `FilePersistence` + `OrcaMachine.resume()`, `LogSink` protocol + `FileSink`/`ConsoleSink`/`MultiSink`. Rich terminal display (Phase 7). LLM workflow refinement via Claude API (Phase 8 — `nanolab.refine`, `--refine` flag). 47 tests (no torch required). Design doc: `docs/demo-nanolab.md`.
 
 ## Known Limitations (v1 parallel regions)
 - `any-final` sync strategy has no native XState equivalent — works in standalone runtimes only
