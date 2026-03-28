@@ -27,7 +27,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        working-directory: packages/orca-lang
 
       - name: Build
         run: pnpm run build
@@ -57,7 +56,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-        working-directory: packages/runtime-ts
 
       - name: Build
         run: pnpm run build
