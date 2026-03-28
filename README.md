@@ -327,7 +327,7 @@ pnpm run test:demo-nanolab
 
 # nanoGPT training with PyTorch (GPU support)
 # Install torch with GPU support, then run the full pipeline
-.venv/bin/pip install torch torchvision torchaudio
+.venv/bin/pip install torch torchvision torchaudio numpy requests
 pnpm run run:demo-nanolab
 ```
 
