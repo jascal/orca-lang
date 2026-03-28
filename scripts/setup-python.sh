@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Find a suitable Python >= 3.10, preferring explicit versioned binaries.
+# Find a suitable Python >= 3.10 (or >= 3.11 if demo-nanolab is present), preferring explicit versioned binaries.
 # Usage: scripts/setup-python.sh
 #   Creates .venv and installs runtime-python + demo-python (+ demo-nanolab if present).
 
 MIN_MAJOR=3
 MIN_MINOR=10
+
+# Bump to 3.11 if demo-nanolab is present (requires >= 3.11)
+if [ -d ./packages/demo-nanolab ]; then
+  MIN_MINOR=11
+fi
 
 find_python() {
   # Try versioned binaries from newest to oldest, then fall back to python3
