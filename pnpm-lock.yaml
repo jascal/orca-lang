@@ -47,7 +47,7 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.28.0
         version: 1.28.0(zod@3.25.76)
-      orca:
+      orca-lang:
         specifier: workspace:*
         version: link:../orca-lang
     devDependencies:

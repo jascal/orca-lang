@@ -1,5 +1,5 @@
 {
-  "name": "orca",
+  "name": "orca-lang",
   "version": "0.1.0",
   "description": "Orca (Orchestrated State Machine Language) - an LLM-native code generation target",
   "type": "module",

@@ -83,11 +83,11 @@ orca /verify-orca machine.orca.md        # always returns JSON
 ### TypeScript library
 
 ```bash
-npm install orca
+npm install orca-lang
 ```
 
 ```typescript
-import { verifySkill, compileSkill, parseSkill } from 'orca/skills';
+import { verifySkill, compileSkill, parseSkill } from 'orca-lang/skills';
 
 const result = await verifySkill({ source: orcaSource });
 ```
@@ -205,7 +205,7 @@ orca compile xstate - < machine.orca.md
 
 **Library**:
 ```typescript
-import { verifySkill } from 'orca/skills';
+import { verifySkill } from 'orca-lang/skills';
 const result = await verifySkill({ source: myOrcaString });
 ```
 

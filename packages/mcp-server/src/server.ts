@@ -16,8 +16,8 @@ import {
   generateOrcaSkill,
   generateOrcaMultiSkill,
   type SkillError,
-} from 'orca/skills';
-import { ORCA_TOOLS } from 'orca/tools';
+} from 'orca-lang/skills';
+import { ORCA_TOOLS } from 'orca-lang/tools';
 
 const TOOLS = ORCA_TOOLS as unknown as Tool[];
 

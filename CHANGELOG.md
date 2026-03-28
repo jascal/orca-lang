@@ -14,7 +14,7 @@ First public release. All core language features, three runtimes at feature pari
 
 | Package | npm / pip / Go |
 |---------|---------------|
-| `orca` | `npm install orca` |
+| `orca-lang` | `npm install orca-lang` |
 | `@orcalang/orca-runtime-ts` | `npm install @orcalang/orca-runtime-ts` |
 | `@orcalang/orca-mcp-server` | `npm install @orcalang/orca-mcp-server` |
 | `orca-runtime-python` | `pip install orca-runtime-python` |
