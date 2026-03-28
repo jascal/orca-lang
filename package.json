@@ -4,7 +4,7 @@
   "private": true,
   "description": "Orca (Orchestrated State Machine Language) - monorepo",
   "scripts": {
-    "build": "pnpm -r --filter './packages/orca-lang' --filter './packages/runtime-ts' run build",
+    "build": "pnpm -r --filter './packages/orca-lang' --filter './packages/runtime-ts' --filter './packages/mcp-server' run build",
     "test": "pnpm -r run test",
     "test:lang": "pnpm --filter orca run test",
     "test:demo-ts": "pnpm --filter orca-demo-ts run test",

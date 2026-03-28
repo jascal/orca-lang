@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	orca "orca-runtime-go/orca_runtime_go"
+	orca "github.com/jascal/orca-lang/packages/runtime-go/orca_runtime_go"
 )
 
 const runID = "trip-demo"

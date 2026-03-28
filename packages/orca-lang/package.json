@@ -5,11 +5,30 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./skills": {
+      "import": "./dist/skills.js",
+      "types": "./dist/skills.d.ts"
+    },
+    "./tools": {
+      "import": "./dist/tools.js",
+      "types": "./dist/tools.d.ts"
+    }
+  },
   "bin": {
     "orca": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "src/"
+  ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "tsx src/index.ts verify",

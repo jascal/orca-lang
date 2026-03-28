@@ -1,7 +1,7 @@
-module orca-demo-go
+module github.com/jascal/orca-lang/packages/demo-go
 
 go 1.21
 
-require orca-runtime-go v0.0.0
+require github.com/jascal/orca-lang/packages/runtime-go v0.0.0
 
-replace orca-runtime-go => ../runtime-go
+replace github.com/jascal/orca-lang/packages/runtime-go => ../runtime-go

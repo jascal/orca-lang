@@ -11,8 +11,12 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "files": [
+    "dist/"
+  ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "test": "tsx tests/guards.test.ts && tsx tests/actions-timeouts.test.ts && tsx tests/ignored-events.test.ts && tsx tests/parallel.test.ts && tsx tests/snapshot-restore.test.ts",
     "lint": "eslint src/"
   },
