@@ -136,7 +136,7 @@ packages/
 pnpm install
 pnpm build
 
-# Python packages (runtime + demos, requires Python >= 3.10)
+# Python packages (runtime + demos, requires Python >= 3.11)
 pnpm run setup:python
 
 # Go packages
