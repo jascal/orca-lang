@@ -23,7 +23,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -52,7 +52,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -82,7 +82,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 8
+          version: 9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -143,8 +143,8 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "packages/runtime-go/v${{ steps.version.outputs.version }}"
-          git push origin "packages/runtime-go/v${{ steps.version.outputs.version }}"
+          git tag -f "packages/runtime-go/v${{ steps.version.outputs.version }}"
+          git push --force origin "packages/runtime-go/v${{ steps.version.outputs.version }}"
 
   # ── GitHub Release notes ─────────────────────────────────────────────────────
   create-release:
