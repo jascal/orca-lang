@@ -136,6 +136,12 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 
 **Phase 5 (nanolab) Complete**: demo-nanolab — all 8 phases shipped. 5-machine orchestrator (TrainingLab, DataPipeline, HyperSearch with parallel regions, TrainingRun, Evaluator). Framework features driven by this demo: `## effects` section in Python parser (`EffectDef`), pluggable `PersistenceAdapter` + `FilePersistence` + `OrcaMachine.resume()`, `LogSink` protocol + `FileSink`/`ConsoleSink`/`MultiSink`. Rich terminal display (Phase 7). LLM workflow refinement via Claude API (Phase 8 — `nanolab.refine`, `--refine` flag). 47 tests (no torch required). Design doc: `docs/demo-nanolab.md`.
 
+**Phase 6 — Agent Adoption & Distribution** ⏳ Not started: Make Orca installable and usable by external agent systems (OpenClaw, AutoGen, Claude tool use, etc.) without cloning the repo or writing files to disk. Three tracks:
+- **Track A — Distribution**: publish npm/PyPI/Go packages, fix Go module path, GitHub Actions release workflow, CHANGELOG
+- **Track B — MCP Server**: `packages/mcp-server` exposing all skills as MCP tools with JSON schemas; stdin support on CLI; `orca --tools --json` self-description
+- **Track C — Skill Completeness**: refactor skills to accept `source` strings (not just file paths), `/parse-machine` (AST as JSON), `/generate-actions` for Python + Go, `/generate-orca-multi` (multi-machine from one spec), looping `/refine-orca`, error catalog, `AGENTS.md` integration guide
+- Design doc: `docs/phase-5-agent-adoption.md`
+
 ## Known Limitations (v1 parallel regions)
 - `any-final` sync strategy has no native XState equivalent — works in standalone runtimes only
 - Nested parallel (parallel inside a region) is disallowed for v1

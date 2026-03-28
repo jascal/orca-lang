@@ -123,8 +123,8 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 | Phase 3.5 | ✅ Complete | Markdown syntax migration — `.orca.md` format with tables, headers, and lists for LLM-native generation |
 | Phase 4 | ✅ Complete | Machine invocation — `InvokeDef` on `StateDef`, single-file multi-machine with `---` separators, cross-machine verifier (cycle detection, child reachability, machine resolution), XState invoke config (`__machine__:Name`), runtime-ts child lifecycle (start on entry, stop on exit, completion events, snapshot/restore), runtime-python port, CLI verify/compile working |
 | Phase 4.5 | ✅ Complete | Go runtime at feature parity with TS/Python; framework features (effects, resume, persistence, logging) ported to all three runtimes + core language; 135 orca-lang / 63 runtime-ts / 69 runtime-python / 16 runtime-go tests |
-| Phase 5 | ⏳ Not started | Ecosystem (package registry, visual editor, fine-tuning, multi-file imports) |
-| Phase 6 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
+| Phase 6 | ⏳ Not started | Agent adoption & distribution — MCP server, package publishing, stdin support, `/parse-machine`, multi-language action scaffolds, `/generate-orca-multi`, error catalog, `AGENTS.md` |
+| Phase 7 | ⏳ Not started | IDE integration — needs rethinking for `.orca.md` embedded in regular markdown files |
 
 **Phase 2.7 detail — what's implemented:**
 - Event bus (pub/sub, request/response), OrcaMachine, effect routing, markdown parsers all work
@@ -169,6 +169,14 @@ import { parseOrcaAuto, OrcaMachine } from '@orca-lang/orca-runtime-ts'
 - ✅ Feature parity: `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`makeEntry()` ported to runtime-ts + runtime-go
 - ✅ Core language: `## effects` section parsing, `EffectDef` in AST, ast-to-markdown round-trip, `ORPHAN_EFFECT`/`UNDECLARED_EFFECT` verifier warnings, `Effect` column in actions table
 - ✅ Demos updated: demo-ts (`test-game.ts`) and demo-go (`cmd/trip/main.go`) showcase all four new features
+
+**Phase 6 plan — Agent Adoption & Distribution (not started):**
+- Design: `docs/phase-5-agent-adoption.md`
+- Three parallel tracks:
+  - **Track A — Distribution**: A1 fix Go module path (`github.com/jascal/orca-lang/packages/runtime-go`), A2 npm `files` + prepublish build, A3 GitHub Actions release workflow (npm + PyPI + Go tag), A4 CHANGELOG + v0.1.0 tag
+  - **Track B — MCP Server**: B1 `packages/mcp-server` (`@orca-lang/orca-mcp-server`) exposing 6 tools via MCP stdio/SSE — all accept `source: string` not file paths, B2 `--stdin` flag on all CLI commands, B3 `orca --tools --json` self-description
+  - **Track C — Skill Completeness**: C1 refactor skills to accept `source` strings (pre-req for MCP), C2 `/parse-machine` skill (AST as JSON), C3 `/generate-actions` for Python + Go, C4 `/generate-orca-multi` (multi-machine from one spec, cross-machine verified), C5 loop `/refine-orca` to convergence, C6 error catalog (`docs/error-catalog.md` — all 19 error codes), C7 `AGENTS.md` (external agent integration guide)
+- Recommended order: C1 → B1 → [B2, C2, C3, C4, C5 in parallel] → B3 → C6 → C7 → A1+A2 → A3 → A4
 
 ### Skills (LLM-friendly CLI commands)
 
