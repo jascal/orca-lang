@@ -16,7 +16,7 @@ export class AnthropicProvider implements LLMProvider {
 
     // MiniMax uses Bearer token auth, Anthropic uses x-api-key
     if (this.baseUrl.includes('minimax.io')) {
-      this.apiKey = config.api_key || process.env.MINIMAX_API_KEY || '';
+      this.apiKey = config.api_key || process.env.MINIMAX_API_KEY || process.env.ANTHROPIC_API_KEY || '';
       this.authType = 'bearer';
     } else {
       this.apiKey = config.api_key || process.env.ANTHROPIC_API_KEY || '';
@@ -24,7 +24,7 @@ export class AnthropicProvider implements LLMProvider {
     }
 
     if (!this.apiKey) {
-      throw new Error(`API key is required for ${this.baseUrl.includes('minimax.io') ? 'MINIMAX_API_KEY' : 'ANTHROPIC_API_KEY'}`);
+      throw new Error(`API key is required for ${this.baseUrl.includes('minimax.io') ? 'MINIMAX_API_KEY or ANTHROPIC_API_KEY' : 'ANTHROPIC_API_KEY'}`);
     }
   }
 

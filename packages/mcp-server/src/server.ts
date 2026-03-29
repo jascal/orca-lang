@@ -16,10 +16,22 @@ import {
   generateOrcaSkill,
   generateOrcaMultiSkill,
   type SkillError,
+  ORCA_SYNTAX_REFERENCE,
+  MULTI_MACHINE_SYNTAX_ADDENDUM,
 } from '@orcalang/orca-lang/skills';
 import { ORCA_TOOLS } from '@orcalang/orca-lang/tools';
 
 const TOOLS = ORCA_TOOLS as unknown as Tool[];
+
+// ── MCP server instructions (injected into every AI context on connect) ───────
+
+const MCP_INSTRUCTIONS = `This MCP server exposes Orca state machine tools. Orca is a markdown-based state machine language designed for LLM code generation.
+
+Recommended workflow: generate_machine (or write source manually) → verify_machine → refine_machine (if errors) → compile_machine → generate_actions.
+
+${ORCA_SYNTAX_REFERENCE}
+
+${MULTI_MACHINE_SYNTAX_ADDENDUM}`;
 
 // ── Tool dispatch ─────────────────────────────────────────────────────────────
 
@@ -87,7 +99,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
 
 const server = new Server(
   { name: 'orca', version: '0.1.0' },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {} }, instructions: MCP_INSTRUCTIONS },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));

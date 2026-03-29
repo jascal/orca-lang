@@ -970,7 +970,7 @@ Provide the corrected machine definition:`;
   };
 }
 
-const ORCA_SYNTAX_REFERENCE = `Orca State Machine Markdown Syntax Reference (.orca.md):
+export const ORCA_SYNTAX_REFERENCE = `Orca State Machine Markdown Syntax Reference (.orca.md):
 
 The machine definition uses standard markdown: headings, tables, bullet lists, and blockquotes.
 
@@ -1050,10 +1050,10 @@ export async function generateOrcaSkill(
   const config = loadConfig(configPath);
 
   // Check if LLM is available
-  if (!config.api_key && !process.env.ANTHROPIC_API_KEY && !process.env.MINIMAX_API_KEY) {
+  if (!config.api_key && !process.env.ANTHROPIC_API_KEY) {
     return {
       status: 'error',
-      error: 'No API key available. Set ANTHROPIC_API_KEY or MINIMAX_API_KEY in .env',
+      error: 'No API key available. Set ANTHROPIC_API_KEY in your environment or .env',
     };
   }
 
@@ -1150,7 +1150,7 @@ Output ONLY the Orca machine definition in .orca.md markdown format, wrapped in 
 
 // ── /generate-orca-multi ─────────────────────────────────────────────────────
 
-const MULTI_MACHINE_SYNTAX_ADDENDUM = `
+export const MULTI_MACHINE_SYNTAX_ADDENDUM = `
 Multi-machine files
 -------------------
 Separate machines with a line containing only three dashes (---).
@@ -1218,10 +1218,10 @@ export async function generateOrcaMultiSkill(
 ): Promise<GenerateMultiResult> {
   const config = loadConfig(configPath);
 
-  if (!config.api_key && !process.env.ANTHROPIC_API_KEY && !process.env.MINIMAX_API_KEY) {
+  if (!config.api_key && !process.env.ANTHROPIC_API_KEY) {
     return {
       status: 'error',
-      error: 'No API key available. Set ANTHROPIC_API_KEY or MINIMAX_API_KEY in .env',
+      error: 'No API key available. Set ANTHROPIC_API_KEY in your environment or .env',
     };
   }
 

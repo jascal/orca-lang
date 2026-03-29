@@ -719,22 +719,26 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
       const sectionName = el.text.toLowerCase();
       if (['context', 'events', 'transitions', 'guards', 'actions', 'effects', 'properties'].includes(sectionName)) {
         currentStateEntry = null;
-        const nextEl = elements[i + 1];
+
+        // Skip past any intervening paragraphs/blockquotes (LLMs often add descriptions)
+        let j = i + 1;
+        while (j < elements.length && (elements[j].kind === 'paragraph' || elements[j].kind === 'blockquote')) j++;
+        const nextEl = elements[j];
 
         if (sectionName === 'context' && nextEl?.kind === 'table') {
-          context = parseContextTable(nextEl); i++;
+          context = parseContextTable(nextEl); i = j;
         } else if (sectionName === 'events' && nextEl?.kind === 'bullets') {
-          events = parseEventsList(nextEl); i++;
+          events = parseEventsList(nextEl); i = j;
         } else if (sectionName === 'transitions' && nextEl?.kind === 'table') {
-          transitions = parseTransitionsTable(nextEl); i++;
+          transitions = parseTransitionsTable(nextEl); i = j;
         } else if (sectionName === 'guards' && nextEl?.kind === 'table') {
-          guards = parseGuardsTable(nextEl); i++;
+          guards = parseGuardsTable(nextEl); i = j;
         } else if (sectionName === 'actions' && nextEl?.kind === 'table') {
-          actions = parseActionsTable(nextEl); i++;
+          actions = parseActionsTable(nextEl); i = j;
         } else if (sectionName === 'effects' && nextEl?.kind === 'table') {
-          effects = parseEffectsTable(nextEl); i++;
+          effects = parseEffectsTable(nextEl); i = j;
         } else if (sectionName === 'properties' && nextEl?.kind === 'bullets') {
-          properties = parsePropertiesList(nextEl); i++;
+          properties = parsePropertiesList(nextEl); i = j;
         }
         continue;
       }

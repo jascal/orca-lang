@@ -16,11 +16,11 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'parse_machine',
     description:
-      'Parse an Orca machine definition and return its structure as JSON (states, events, transitions, guards, actions, context). Supports single and multi-machine files.',
+      'Parse an Orca machine definition and return its structure as JSON (states, events, transitions, guards, actions, context). Supports single and multi-machine files. Source must use "# machine Name" heading, "## state Name [initial]" for states, and a "## transitions" section with a | Source | Event | Guard | Target | Action | table.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Raw .orca.md content' },
+        source: { type: 'string', description: 'Raw .orca.md content. Must start with "# machine Name". States use "## state Name [initial|final]". Transitions use a markdown table with columns: Source, Event, Guard, Target, Action.' },
       },
       required: ['source'],
     },
@@ -28,11 +28,11 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'verify_machine',
     description:
-      'Verify an Orca machine definition for structural correctness, completeness, and determinism. Returns structured errors and warnings.',
+      'Verify an Orca machine definition for structural correctness, completeness, and determinism. Checks that exactly one [initial] state exists, all states are reachable, no deadlocks exist (every non-final state handles all events or has timeouts), and guards on competing transitions are mutually exclusive. Returns structured errors and warnings.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Raw .orca.md content' },
+        source: { type: 'string', description: 'Raw .orca.md content. Must start with "# machine Name". States use "## state Name [initial|final]". Transitions use a markdown table with columns: Source, Event, Guard, Target, Action.' },
       },
       required: ['source'],
     },
@@ -40,11 +40,11 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'compile_machine',
     description:
-      'Compile an Orca machine to XState v5 config (TypeScript) or Mermaid stateDiagram-v2.',
+      'Compile a verified Orca machine to XState v5 config (TypeScript) or Mermaid stateDiagram-v2. Run verify_machine first to catch errors before compiling.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Raw .orca.md content' },
+        source: { type: 'string', description: 'Raw .orca.md content. Must start with "# machine Name". States use "## state Name [initial|final]". Transitions use a markdown table with columns: Source, Event, Guard, Target, Action.' },
         target: {
           type: 'string',
           enum: ['xstate', 'mermaid'],
@@ -76,11 +76,11 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'generate_actions',
     description:
-      'Generate action scaffold code for an Orca machine in TypeScript, Python, or Go. Includes registration comments and optional test scaffolds.',
+      'Generate action scaffold code for an Orca machine in TypeScript, Python, or Go. Includes registration comments and optional test scaffolds. Requires a successfully parsed machine — pass verified .orca.md source.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Raw .orca.md content' },
+        source: { type: 'string', description: 'Raw .orca.md content of a valid machine. Actions in the "## actions" table (| Name | Signature |) will have stubs generated.' },
         lang: {
           type: 'string',
           enum: ['typescript', 'python', 'go'],
@@ -120,11 +120,11 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'refine_machine',
     description:
-      'Fix verification errors in an Orca machine using an LLM. Loops until the machine is valid or max_iterations is reached. If errors are not provided, verification runs automatically first.',
+      'Fix verification errors in an Orca machine using an LLM. Loops until the machine is valid or max_iterations is reached. If errors are not provided, verification runs automatically first. Use this after verify_machine returns errors.',
     inputSchema: {
       type: 'object',
       properties: {
-        source: { type: 'string', description: 'Raw .orca.md content with errors' },
+        source: { type: 'string', description: 'Raw .orca.md content with errors. Must use "# machine Name" heading and proper Orca markdown syntax.' },
         errors: {
           type: 'array',
           description:
