@@ -1,5 +1,13 @@
 # @orcalang/orca-lang
 
+## 0.1.12
+
+### Patch Changes
+
+- fix(llm): use `max_completion_tokens` for o-series OpenAI models; omit `temperature` for reasoning models
+
+---
+
 ## 0.1.11
 
 ### Patch Changes

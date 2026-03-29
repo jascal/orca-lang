@@ -6,6 +6,15 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.12] — 2026-03-29
+
+### Fixed
+
+- `packages/orca-lang/src/llm/openai.ts`: use `max_completion_tokens` for o-series reasoning models (o1, o3, o4-mini, etc.) that reject `max_tokens`; omit `temperature` for reasoning models
+- `packages/runtime-go/go.mod`: remove `toolchain go1.23.4` pin — minimum `go 1.21` is sufficient and avoids forced toolchain downloads
+
+---
+
 ## [v0.1.11] — 2026-03-29
 
 ### Fixed

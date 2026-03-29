@@ -1,5 +1,13 @@
 # @orcalang/orca-mcp-server
 
+## 0.1.12
+
+### Patch Changes
+
+- chore: version bump
+
+---
+
 ## 0.1.11
 
 ### Patch Changes

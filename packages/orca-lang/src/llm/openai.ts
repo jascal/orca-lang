@@ -23,20 +23,31 @@ export class OpenAIProvider implements LLMProvider {
     return 'openai';
   }
 
+  // o-series reasoning models (o1, o3, o4-mini, etc.) use max_completion_tokens
+  private isReasoningModel(model: string): boolean {
+    return /^o\d/.test(model);
+  }
+
   async complete(request: LLMRequest): Promise<LLMResponse> {
+    const model = request.model || this.model;
+    const reasoning = this.isReasoningModel(model);
+    const tokenParam = reasoning ? 'max_completion_tokens' : 'max_tokens';
+    const body: Record<string, unknown> = {
+      model,
+      messages: request.messages,
+      [tokenParam]: request.max_tokens || this.maxTokens,
+      stop: request.stop_sequences,
+    };
+    if (!reasoning) {
+      body.temperature = request.temperature ?? this.temperature;
+    }
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify({
-        model: request.model || this.model,
-        messages: request.messages,
-        max_tokens: request.max_tokens || this.maxTokens,
-        temperature: request.temperature ?? this.temperature,
-        stop: request.stop_sequences,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

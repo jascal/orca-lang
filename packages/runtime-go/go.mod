@@ -1,5 +1,3 @@
-module github.com/jascal/orca-lang/packages/runtime-go v0.1.5
+module github.com/jascal/orca-lang/packages/runtime-go v0.1.12
 
 go 1.21
-
-toolchain go1.23.4
