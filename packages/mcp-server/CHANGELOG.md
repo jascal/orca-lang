@@ -1,5 +1,12 @@
 # @orcalang/orca-mcp-server
 
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies
+  - @orcalang/orca-lang@0.1.14
+
 ## 0.1.12
 
 ### Patch Changes
@@ -29,7 +36,6 @@
 ### Patch Changes
 
 - fix(ci): correct mcp-publisher binary download URL in release workflow
-
 
 ## 0.1.6
 
