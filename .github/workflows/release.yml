@@ -199,7 +199,7 @@ jobs:
       - name: Download mcp-publisher
         run: |
           VERSION=$(curl -s https://api.github.com/repos/modelcontextprotocol/registry/releases/latest | grep -o '"tag_name": "v[^"]*' | cut -d'"' -f4)
-          curl -sL "https://github.com/modelcontextprotocol/registry/releases/download/${VERSION}/linux_amd64.tar.gz" | tar xz
+          curl -sL "https://github.com/modelcontextprotocol/registry/releases/download/${VERSION}/mcp-publisher_linux_amd64.tar.gz" | tar xz
           chmod +x mcp-publisher
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish --npm-token=${{ secrets.NPM_TOKEN }}
