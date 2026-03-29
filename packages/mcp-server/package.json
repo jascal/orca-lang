@@ -1,6 +1,6 @@
 {
   "name": "@orcalang/orca-mcp-server",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "MCP server exposing Orca state machine tools — parse, verify, compile, generate, refine",
   "type": "module",
   "main": "dist/server.js",
