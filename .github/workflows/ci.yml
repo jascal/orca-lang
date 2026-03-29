@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -25,17 +26,23 @@ jobs:
       - name: Detect changed packages
         id: changes
         run: |
-          # Get the previous commit SHA (the one before this push)
-          PREV_SHA="${{ github.event.before }}"
-          if [ "$PREV_SHA" == "0000000000000000000000000000000000000000" ]; then
-            # First push to branch - use first parent if available, otherwise HEAD~1
-            PREV_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+          # Compare against the last tagged commit (not the previous push commit),
+          # so that new changeset files added in prior pushes are still detected.
+          # Fall back to the previous commit SHA if no tags exist yet.
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            PREV_SHA=$(git rev-parse "$LAST_TAG" 2>/dev/null)
+          else
+            PREV_SHA="${{ github.event.before }}"
+            if [ "$PREV_SHA" == "0000000000000000000000000000000000000000" ]; then
+              PREV_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+            fi
           fi
 
-          echo "Comparing against: $PREV_SHA"
+          echo "Comparing against: $PREV_SHA (last tag: $LAST_TAG)"
 
-          # Get list of changed files
-          CHANGES=$(git diff --name-only $PREV_SHA HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          # Get list of changed AND added files since last tag
+          CHANGES=$(git diff --name-only $PREV_SHA HEAD 2>/dev/null)
           echo "Changed files: $CHANGES"
 
           PACKAGES=""
@@ -48,6 +55,7 @@ jobs:
               packages/mcp-server/*) PACKAGES="$PACKAGES mcp-server"; HAS_CHANGES="true" ;;
               packages/runtime-python/*) PACKAGES="$PACKAGES runtime-python"; HAS_CHANGES="true" ;;
               packages/runtime-go/*) PACKAGES="$PACKAGES runtime-go"; HAS_CHANGES="true" ;;
+              .changeset/*.md) HAS_CHANGES="true" ;;
             esac
           done
 
