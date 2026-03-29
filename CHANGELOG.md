@@ -6,6 +6,14 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.13] — 2026-03-29
+
+### Fixed
+
+- `packages/orca-lang/src/llm/openai.ts`: always use `max_completion_tokens` (not `max_tokens`) for all OpenAI models — newer GPT models (gpt-5.x, etc.) reject `max_tokens` just like o-series models do
+
+---
+
 ## [v0.1.12] — 2026-03-29
 
 ### Fixed
