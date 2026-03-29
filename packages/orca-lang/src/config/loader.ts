@@ -88,7 +88,20 @@ export function loadConfig(configPath?: string): OrcaConfig {
     configs.push(interpolateEnvVars(parsed) as Partial<OrcaConfig>);
   }
 
-  // 3. Merge all configs in order (later ones override earlier)
+  // 3. Environment variable overrides (ORCA_* prefix)
+  // These take precedence over all config files — ideal for MCP servers where
+  // config comes entirely from the host's env block (e.g. Claude Code settings)
+  const envOverrides: Partial<OrcaConfig> = {};
+  if (process.env.ORCA_PROVIDER) envOverrides.provider = process.env.ORCA_PROVIDER as OrcaConfig['provider'];
+  if (process.env.ORCA_MODEL) envOverrides.model = process.env.ORCA_MODEL;
+  if (process.env.ORCA_BASE_URL) envOverrides.base_url = process.env.ORCA_BASE_URL;
+  if (process.env.ORCA_API_KEY) envOverrides.api_key = process.env.ORCA_API_KEY;
+  if (process.env.ORCA_CODE_GENERATOR) envOverrides.code_generator = process.env.ORCA_CODE_GENERATOR as OrcaConfig['code_generator'];
+  if (process.env.ORCA_MAX_TOKENS) envOverrides.max_tokens = parseInt(process.env.ORCA_MAX_TOKENS, 10);
+  if (process.env.ORCA_TEMPERATURE) envOverrides.temperature = parseFloat(process.env.ORCA_TEMPERATURE);
+  configs.push(envOverrides);
+
+  // 4. Merge all configs in order (later ones override earlier)
   let result = DEFAULT_CONFIG;
   for (const config of configs) {
     result = deepMerge(result, config);

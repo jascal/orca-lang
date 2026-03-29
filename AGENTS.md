@@ -169,72 +169,25 @@ Configure the LLM provider via environment variables or an `.orca.env` file. The
 
 #### Anthropic (default)
 
-```env
-# .env or shell
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-```yaml
-# orca.yaml / .orca.yaml
-provider: anthropic
-model: claude-sonnet-4-6
-api_key: ${ANTHROPIC_API_KEY}
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "npx",
+      "args": ["-y", "@orcalang/orca-mcp-server"],
+      "env": {
+        "ORCA_API_KEY": "${ANTHROPIC_API_KEY}",
+        "ORCA_PROVIDER": "anthropic",
+        "ORCA_MODEL": "claude-sonnet-4-6"
+      }
+    }
+  }
+}
 ```
 
 #### MiniMax (via Anthropic-compatible API)
 
-MiniMax uses the same message format as Anthropic but with Bearer auth. Set the base URL to MiniMax's endpoint:
-
-```env
-MINIMAX_API_KEY=...
-```
-
-```yaml
-# orca.yaml / .orca.yaml
-provider: anthropic
-base_url: https://api.minimaxi.chat/v1
-model: MiniMax-Text-01
-api_key: ${MINIMAX_API_KEY}
-```
-
-The server also accepts `ANTHROPIC_API_KEY` as a fallback if `MINIMAX_API_KEY` is not set.
-
-#### OpenAI (and OpenAI-compatible providers)
-
-```env
-OPENAI_API_KEY=sk-...
-```
-
-```yaml
-# orca.yaml / .orca.yaml
-provider: openai
-model: gpt-4o
-api_key: ${OPENAI_API_KEY}
-```
-
-Works with any OpenAI-compatible API by setting `base_url`:
-
-```yaml
-provider: openai
-base_url: https://api.deepseek.com/v1
-model: deepseek-chat
-api_key: ${DEEPSEEK_API_KEY}
-```
-
-#### Ollama (local models)
-
-```yaml
-# orca.yaml / .orca.yaml
-provider: ollama
-base_url: http://localhost:11434
-model: llama3
-```
-
-No API key required for local Ollama instances.
-
-### MCP Server Env Config
-
-For the MCP server, set provider keys in your Claude Code settings:
+MiniMax uses Bearer auth and the same message format as Anthropic. Set the base URL to MiniMax's endpoint:
 
 ```json
 {
@@ -243,16 +196,77 @@ For the MCP server, set provider keys in your Claude Code settings:
       "command": "npx",
       "args": ["-y", "@orcalang/orca-mcp-server"],
       "env": {
-        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
-        "MINIMAX_API_KEY": "${MINIMAX_API_KEY}",
-        "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+        "ORCA_API_KEY": "${MINIMAX_API_KEY}",
+        "ORCA_PROVIDER": "anthropic",
+        "ORCA_BASE_URL": "https://api.minimaxi.chat/v1",
+        "ORCA_MODEL": "MiniMax-Text-01"
       }
     }
   }
 }
 ```
 
-All env vars are passed through; the skills use whichever key matches the configured provider.
+#### OpenAI (and OpenAI-compatible providers)
+
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "npx",
+      "args": ["-y", "@orcalang/orca-mcp-server"],
+      "env": {
+        "ORCA_API_KEY": "${OPENAI_API_KEY}",
+        "ORCA_PROVIDER": "openai",
+        "ORCA_BASE_URL": "https://api.openai.com/v1",
+        "ORCA_MODEL": "gpt-4o"
+      }
+    }
+  }
+}
+```
+
+Works with any OpenAI-compatible API by changing `ORCA_BASE_URL`:
+
+```json
+"ORCA_BASE_URL": "https://api.deepseek.com/v1",
+"ORCA_MODEL": "deepseek-chat"
+```
+
+#### Ollama (local models)
+
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "npx",
+      "args": ["-y", "@orcalang/orca-mcp-server"],
+      "env": {
+        "ORCA_PROVIDER": "ollama",
+        "ORCA_BASE_URL": "http://localhost:11434",
+        "ORCA_MODEL": "llama3"
+      }
+    }
+  }
+}
+```
+
+No API key required for local Ollama instances.
+
+### ORCA_* Environment Variables
+
+The MCP server reads these env vars to configure the LLM provider (they override `orca.yaml` / `~/.orca/default.yaml` config files):
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ORCA_PROVIDER` | `anthropic`, `openai`, `ollama`, `grok` | `anthropic` |
+| `ORCA_MODEL` | Model name | `claude-sonnet-4-6` |
+| `ORCA_BASE_URL` | API endpoint URL | (provider default) |
+| `ORCA_API_KEY` | API key | (none — set in env) |
+| `ORCA_CODE_GENERATOR` | `typescript`, `python`, `go`, `rust` | `typescript` |
+| `ORCA_MAX_TOKENS` | Max tokens per completion | `4096` |
+| `ORCA_TEMPERATURE` | Sampling temperature | `0.7` |
+
+These are separate from the SDK auth keys (`ANTHROPIC_API_KEY`, `MINIMAX_API_KEY`, `OPENAI_API_KEY`) — the ORCA vars configure *which* provider to use, while the `*_API_KEY` vars provide the credentials.
 
 **Using your own LLM instead of Orca's**: If your agent already has LLM access, you can bypass Orca's generation tools and generate source directly, then use the deterministic tools (`verify_machine`, `compile_machine`, `parse_machine`) for validation. Pass the LLM-generated `.orca.md` string directly to `verify_machine`. Use `refine_machine` with an explicit `errors` array if you want Orca to attempt correction.
 
