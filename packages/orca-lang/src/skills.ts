@@ -974,6 +974,83 @@ export const ORCA_SYNTAX_REFERENCE = `Orca State Machine Markdown Syntax Referen
 
 The machine definition uses standard markdown: headings, tables, bullet lists, and blockquotes.
 
+CRITICAL SYNTAX RULES (do not deviate):
+- Initial state: MUST use [initial] in the heading: \`## state stateName [initial]\`
+  There is NO alternative syntax. Never use "initial: true" or any other form.
+- Final state: MUST use [final] in the heading: \`## state stateName [final]\`
+  There is NO alternative syntax. Never use "final: true" or any other form.
+- Every state referenced in transitions MUST have a \`## state\` heading declared.
+
+## Complete example (self-contained, valid machine):
+
+\`\`\`orca.md
+# machine OrderProcessor
+
+## context
+
+| Field    | Type    | Default  |
+|----------|---------|----------|
+| orderId  | string  |          |
+| retries  | int     | 0        |
+| error    | string? |          |
+
+## events
+
+- submit
+- payment_ok
+- payment_failed
+- retry
+- cancel
+
+## state idle [initial]
+> Waiting for an order to be submitted
+- ignore: payment_ok, payment_failed, retry
+
+## state processing
+> Processing the payment
+- on_entry: start_payment
+- timeout: 30s -> failed
+
+## state done [final]
+> Order complete
+
+## state failed
+> Payment failed
+- ignore: submit, payment_ok
+
+## transitions
+
+| Source     | Event           | Guard          | Target     | Action          |
+|------------|-----------------|----------------|------------|-----------------|
+| idle       | submit          |                | processing | init_order      |
+| idle       | cancel          |                | idle       |                 |
+| processing | payment_ok      |                | done       | complete_order  |
+| processing | payment_failed  | can_retry      | failed     | record_error    |
+| processing | payment_failed  | !can_retry     | failed     | record_error    |
+| processing | cancel          |                | idle       | cancel_order    |
+| failed     | retry           | can_retry      | processing | increment_retry |
+| failed     | cancel          |                | idle       | cancel_order    |
+
+## guards
+
+| Name      | Expression           |
+|-----------|----------------------|
+| can_retry | \`ctx.retries < 3\`    |
+
+## actions
+
+| Name             | Signature                                    |
+|------------------|----------------------------------------------|
+| init_order       | \`(ctx, event) -> Context\`                    |
+| start_payment    | \`(ctx) -> Context + Effect<ChargeCard>\`      |
+| complete_order   | \`(ctx, event) -> Context\`                    |
+| record_error     | \`(ctx, event) -> Context\`                    |
+| increment_retry  | \`(ctx) -> Context\`                           |
+| cancel_order     | \`(ctx) -> Context\`                           |
+\`\`\`
+
+## Full syntax reference:
+
 # machine MachineName
 
 ## context
@@ -997,6 +1074,9 @@ The machine definition uses standard markdown: headings, tables, bullet lists, a
 - on_exit: action_name
 - timeout: 5s -> target_state
 - ignore: event1, event2
+
+## state active
+> An intermediate state (no [initial] or [final] marker)
 
 ## state done [final]
 > Terminal state
@@ -1027,8 +1107,9 @@ NOTE: Guards support ONLY: comparisons (< > == != <= >=), null checks (== null, 
 | action3 | \`(ctx) -> Context + Effect<EffectType>\`    |
 
 Key syntax notes:
-- [initial] marks the initial state (exactly one required)
-- [final] marks terminal states (zero or more allowed)
+- [initial] marks the initial state — exactly one required, NO other syntax exists
+- [final] marks terminal states — zero or more allowed, NO other syntax exists
+- Every state name used in transitions MUST be declared with a ## state heading
 - Empty action column means "no action" (transition only changes state)
 - Guard column uses guard name from guards table; prefix with ! to negate
 - Guard expressions in backticks in the guards table
@@ -1353,6 +1434,7 @@ Output ONLY the complete multi-machine Orca definition in .orca.md markdown form
 
 function stripCodeFence(code: string): string {
   return code
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/^```(?:orca|markdown|md|orca\.md)?\n/, '')
     .replace(/^```\n/, '')
     .replace(/\n```$/, '')
