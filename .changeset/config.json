@@ -3,10 +3,12 @@
   "changelog": "@changesets/cli/changelog",
   "commit": false,
   "fixed": [
-    "@orcalang/orca-lang",
-    "@orcalang/orca-runtime-ts",
-    "@orcalang/orca-mcp-server",
-    "orca-runtime-python"
+    [
+      "@orcalang/orca-lang",
+      "@orcalang/orca-runtime-ts",
+      "@orcalang/orca-mcp-server",
+      "orca-runtime-python"
+    ]
   ],
   "linked": [],
   "access": "public",
