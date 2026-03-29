@@ -1049,11 +1049,24 @@ export async function generateOrcaSkill(
 ): Promise<GenerateOrcaResult> {
   const config = loadConfig(configPath);
 
-  // Check if LLM is available
-  if (!config.api_key && !process.env.ANTHROPIC_API_KEY) {
+  // Determine which env var to check based on provider and base URL
+  const isMiniMax = config.base_url?.includes('minimaxi.chat') || config.base_url?.includes('minimax.io');
+  const anthropicKey = isMiniMax
+    ? (config.api_key || process.env.MINIMAX_API_KEY || process.env.ANTHROPIC_API_KEY)
+    : (config.api_key || process.env.ANTHROPIC_API_KEY);
+  const openaiKey = config.api_key || process.env.OPENAI_API_KEY;
+  const hasKey =
+    config.provider === 'openai' ? openaiKey :
+    config.provider === 'ollama' ? true :  // Ollama needs no key (local)
+    anthropicKey;
+
+  if (!hasKey) {
+    const keyName = config.provider === 'openai' ? 'OPENAI_API_KEY'
+      : isMiniMax ? 'MINIMAX_API_KEY (or ANTHROPIC_API_KEY)'
+      : 'ANTHROPIC_API_KEY';
     return {
       status: 'error',
-      error: 'No API key available. Set ANTHROPIC_API_KEY in your environment or .env',
+      error: `No API key available. Set ${keyName} in your environment or .env`,
     };
   }
 
@@ -1218,10 +1231,24 @@ export async function generateOrcaMultiSkill(
 ): Promise<GenerateMultiResult> {
   const config = loadConfig(configPath);
 
-  if (!config.api_key && !process.env.ANTHROPIC_API_KEY) {
+  // Determine which env var to check based on provider and base URL
+  const isMiniMax = config.base_url?.includes('minimaxi.chat') || config.base_url?.includes('minimax.io');
+  const anthropicKey = isMiniMax
+    ? (config.api_key || process.env.MINIMAX_API_KEY || process.env.ANTHROPIC_API_KEY)
+    : (config.api_key || process.env.ANTHROPIC_API_KEY);
+  const openaiKey = config.api_key || process.env.OPENAI_API_KEY;
+  const hasKey =
+    config.provider === 'openai' ? openaiKey :
+    config.provider === 'ollama' ? true :
+    anthropicKey;
+
+  if (!hasKey) {
+    const keyName = config.provider === 'openai' ? 'OPENAI_API_KEY'
+      : isMiniMax ? 'MINIMAX_API_KEY (or ANTHROPIC_API_KEY)'
+      : 'ANTHROPIC_API_KEY';
     return {
       status: 'error',
-      error: 'No API key available. Set ANTHROPIC_API_KEY in your environment or .env',
+      error: `No API key available. Set ${keyName} in your environment or .env`,
     };
   }
 

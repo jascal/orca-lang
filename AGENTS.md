@@ -153,37 +153,106 @@ scaffolds = generate_actions(source=source, lang="typescript")
 
 ## Handling LLM Auth
 
-| Tool | Calls LLM | Requires `ANTHROPIC_API_KEY` |
-|------|-----------|------------------------------|
-| `parse_machine` | No | No |
-| `verify_machine` | No | No |
-| `compile_machine` | No | No |
-| `generate_machine` | Yes | Yes |
-| `generate_multi_machine` | Yes | Yes |
-| `generate_actions` | Only if `use_llm: true` | Yes (if LLM enabled) |
-| `refine_machine` | Yes | Yes |
+| Tool | Calls LLM | Required Key |
+|------|-----------|--------------|
+| `parse_machine` | No | None |
+| `verify_machine` | No | None |
+| `compile_machine` | No | None |
+| `generate_machine` | Yes | See providers below |
+| `generate_multi_machine` | Yes | See providers below |
+| `generate_actions` | Only if `use_llm: true` | See providers below |
+| `refine_machine` | Yes | See providers below |
 
-`generate_machine`, `generate_multi_machine`, and `refine_machine` call an LLM. Configure via environment variables:
+Configure the LLM provider via environment variables or an `.orca.env` file. The MCP server passes `env` values from your Claude Code settings directly to the skills.
 
-```bash
-# Anthropic (default)
-export ANTHROPIC_API_KEY=sk-ant-...
+### Provider Configuration
 
-# OpenAI-compatible
-export OPENAI_API_KEY=...
-export OPENAI_BASE_URL=https://api.openai.com/v1
-
-# Ollama (local)
-export OLLAMA_BASE_URL=http://localhost:11434
-```
-
-Or use an `.orca.env` file in the working directory:
+#### Anthropic (default)
 
 ```env
-provider=anthropic
-api_key=sk-ant-...
-model=claude-opus-4-6
+# .env or shell
+ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+```yaml
+# orca.yaml / .orca.yaml
+provider: anthropic
+model: claude-sonnet-4-6
+api_key: ${ANTHROPIC_API_KEY}
+```
+
+#### MiniMax (via Anthropic-compatible API)
+
+MiniMax uses the same message format as Anthropic but with Bearer auth. Set the base URL to MiniMax's endpoint:
+
+```env
+MINIMAX_API_KEY=...
+```
+
+```yaml
+# orca.yaml / .orca.yaml
+provider: anthropic
+base_url: https://api.minimaxi.chat/v1
+model: MiniMax-Text-01
+api_key: ${MINIMAX_API_KEY}
+```
+
+The server also accepts `ANTHROPIC_API_KEY` as a fallback if `MINIMAX_API_KEY` is not set.
+
+#### OpenAI (and OpenAI-compatible providers)
+
+```env
+OPENAI_API_KEY=sk-...
+```
+
+```yaml
+# orca.yaml / .orca.yaml
+provider: openai
+model: gpt-4o
+api_key: ${OPENAI_API_KEY}
+```
+
+Works with any OpenAI-compatible API by setting `base_url`:
+
+```yaml
+provider: openai
+base_url: https://api.deepseek.com/v1
+model: deepseek-chat
+api_key: ${DEEPSEEK_API_KEY}
+```
+
+#### Ollama (local models)
+
+```yaml
+# orca.yaml / .orca.yaml
+provider: ollama
+base_url: http://localhost:11434
+model: llama3
+```
+
+No API key required for local Ollama instances.
+
+### MCP Server Env Config
+
+For the MCP server, set provider keys in your Claude Code settings:
+
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "npx",
+      "args": ["-y", "@orcalang/orca-mcp-server"],
+      "env": {
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+        "MINIMAX_API_KEY": "${MINIMAX_API_KEY}",
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+All env vars are passed through; the skills use whichever key matches the configured provider.
 
 **Using your own LLM instead of Orca's**: If your agent already has LLM access, you can bypass Orca's generation tools and generate source directly, then use the deterministic tools (`verify_machine`, `compile_machine`, `parse_machine`) for validation. Pass the LLM-generated `.orca.md` string directly to `verify_machine`. Use `refine_machine` with an explicit `errors` array if you want Orca to attempt correction.
 
