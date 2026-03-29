@@ -6,6 +6,14 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.9] — 2026-03-29
+
+### Fixed
+
+- `release.yml`: correct `mcp-publisher` binary download URL (`mcp-publisher_linux_amd64.tar.gz` was missing the `mcp-publisher_` prefix, causing curl to fetch a 404 and tar to fail with "not in gzip format").
+
+---
+
 ## [v0.1.6] — 2026-03-29
 
 ### Added
