@@ -21,6 +21,13 @@ import {
 } from '@orcalang/orca-lang/skills';
 import { ORCA_TOOLS } from '@orcalang/orca-lang/tools';
 
+// ── Node.js version check ─────────────────────────────────────────────────────
+const [major] = process.version.slice(1).split('.').map(Number);
+if (major < 20) {
+  console.error(`ERROR: @orcalang/orca-mcp-server requires Node.js 20 or later. Current version: ${process.version}`);
+  process.exit(1);
+}
+
 const TOOLS = ORCA_TOOLS as unknown as Tool[];
 
 // ── MCP server instructions (injected into every AI context on connect) ───────
