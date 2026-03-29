@@ -6,6 +6,22 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.4] — 2026-03-29
+
+### Fixed
+
+- `@orcalang/orca-lang`: check `ORCA_API_KEY` in `AnthropicProvider` so the MCP server `generate_machine` tool works with Claude Code env-block config.
+
+### Added
+
+- `generate_machine` (MCP) now auto-routes: specs that mention a coordinator, orchestrator, or multiple independently-lifecycled sub-processes are routed to multi-machine generation automatically. Result includes an `is_multi` flag.
+- Discrete verify step: `generate_machine` and `generate_multi_machine` return a single-LLM-call draft with no internal verify loop — callers chain `verify_machine` → `refine_machine` → `verify_machine` as separately-visible tool calls.
+- New exports from `@orcalang/orca-lang/skills`: `generateAutoSkill`, `generateOrcaDraftSkill`, `generateOrcaMultiDraftSkill`, `detectMultiMachine`.
+- `max_iterations` removed from `generate_machine` / `generate_multi_machine` MCP tool schemas.
+- README: Skills & MCP setup section with install instructions for Claude Desktop and Claude Code.
+
+---
+
 ## [v0.1.1] — 2026-03-28
 
 ### Fixed
