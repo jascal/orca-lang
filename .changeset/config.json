@@ -6,8 +6,7 @@
     [
       "@orcalang/orca-lang",
       "@orcalang/orca-runtime-ts",
-      "@orcalang/orca-mcp-server",
-      "orca-runtime-python"
+      "@orcalang/orca-mcp-server"
     ]
   ],
   "linked": [],

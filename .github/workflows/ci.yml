@@ -118,50 +118,68 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Create changeset for changed packages
+      - name: Create changeset for npm packages
         run: |
           PACKAGES="${{ needs.detect-changes.outputs.packages }}"
           echo "Packages that changed: $PACKAGES"
 
-          # Generate a changeset file for each changed package
+          # Only create changesets for npm packages (changesets doesn't handle Python/Go)
           for PKG in $PACKAGES; do
             case "$PKG" in
               orca-lang) NAME="@orcalang/orca-lang" ;;
               runtime-ts) NAME="@orcalang/orca-runtime-ts" ;;
               mcp-server) NAME="@orcalang/orca-mcp-server" ;;
-              runtime-python) NAME="orca-runtime-python" ;;
-              runtime-go) NAME="github.com/jascal/orca-lang/packages/runtime-go" ;;
+              runtime-python) continue ;;  # handled separately below
+              runtime-go) continue ;;      # handled separately below
             esac
-            echo "Creating changeset for: $NAME"
-            # Use patch bump by default; changesets will determine minor/major from PR titles
+            echo "Creating changeset for npm package: $NAME"
             echo -e "---\n\"$NAME\": patch\n---\n\nBump $NAME" > .changeset/ci-${PKG}.md
           done
 
-      - name: Run changesets version
+      - name: Run changesets version (npm packages)
         id: version
         run: |
           # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Check if there are changeset files
           if ls .changeset/*.md 2>/dev/null | grep -v README.md > /dev/null; then
-            echo "Running changesets version..."
+            echo "Running changesets version for npm packages..."
             pnpm changeset version
 
-            # Get the new version
+            # Get the new version (all npm packages use the same version due to fixed)
             VERSION=$(node -p "require('./packages/orca-lang/package.json').version")
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "bumped=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No changeset files found, skipping version bump"
+            echo "No changeset files found, skipping npm version bump"
             echo "bumped=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Bump Python package version
+        if: steps.version.outputs.bumped == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "Bumping runtime-python to $VERSION"
+          # Update pyproject.toml: replace version line
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" packages/runtime-python/pyproject.toml
+          cat packages/runtime-python/pyproject.toml | grep "^version"
+
+      - name: Bump Go module version
+        if: steps.version.outputs.bumped == 'true'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "Bumping runtime-go module to v$VERSION"
+          # Update go.mod module version comment
+          sed -i "s|github.com/jascal/orca-lang/packages/runtime-go.*|github.com/jascal/orca-lang/packages/runtime-go v$VERSION|" packages/runtime-go/go.mod
+          grep "module github.com/jascal/orca-lang/packages/runtime-go" packages/runtime-go/go.mod
 
       - name: Push version bump commit
         if: steps.version.outputs.bumped == 'true'
         run: |
           VERSION=${{ steps.version.outputs.version }}
+          git add -A
+          git commit -m "chore: bump all packages to v${VERSION}"
           git push origin HEAD:${{ github.ref_name }}
 
           # Tag and push
