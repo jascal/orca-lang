@@ -1,9 +1,13 @@
 name: Release
 
+# Triggered by:
+#   - git push of a version tag (v*) — automatic CI releases
+#   - workflow_dispatch — manual trigger from GitHub UI
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,6 +17,7 @@ jobs:
   publish-npm-orca:
     name: Publish orca (npm)
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +54,7 @@ jobs:
   publish-npm-runtime-ts:
     name: Publish @orca-lang/orca-runtime-ts (npm)
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -85,6 +91,7 @@ jobs:
   publish-npm-mcp-server:
     name: Publish @orca-lang/orca-mcp-server (npm)
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: publish-npm-orca
     steps:
       - uses: actions/checkout@v4
@@ -126,6 +133,7 @@ jobs:
   publish-pypi:
     name: Publish orca-runtime-python (PyPI)
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -158,6 +166,7 @@ jobs:
   tag-go:
     name: Tag Go module
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
@@ -178,6 +187,8 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    # Only run when triggered by a tag push; skip for manual workflow_dispatch without tag
+    if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - publish-npm-orca
       - publish-npm-runtime-ts

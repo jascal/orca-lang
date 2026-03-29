@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Detect changed packages ──────────────────────────────────────────────────
+  detect-changes:
+    name: Detect changed packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.changes.outputs.packages }}
+      has-changes: ${{ steps.changes.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed packages
+        id: changes
+        run: |
+          # Get the previous commit SHA (the one before this push)
+          PREV_SHA="${{ github.event.before }}"
+          if [ "$PREV_SHA" == "0000000000000000000000000000000000000000" ]; then
+            # First push to branch - use first parent if available, otherwise HEAD~1
+            PREV_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
+          fi
+
+          echo "Comparing against: $PREV_SHA"
+
+          # Get list of changed files
+          CHANGES=$(git diff --name-only $PREV_SHA HEAD 2>/dev/null || git diff --name-only HEAD~1 HEAD)
+          echo "Changed files: $CHANGES"
+
+          PACKAGES=""
+          HAS_CHANGES="false"
+
+          for FILE in $CHANGES; do
+            case "$FILE" in
+              packages/orca-lang/*) PACKAGES="$PACKAGES orca-lang"; HAS_CHANGES="true" ;;
+              packages/runtime-ts/*) PACKAGES="$PACKAGES runtime-ts"; HAS_CHANGES="true" ;;
+              packages/mcp-server/*) PACKAGES="$PACKAGES mcp-server"; HAS_CHANGES="true" ;;
+              packages/runtime-python/*) PACKAGES="$PACKAGES runtime-python"; HAS_CHANGES="true" ;;
+              packages/runtime-go/*) PACKAGES="$PACKAGES runtime-go"; HAS_CHANGES="true" ;;
+            esac
+          done
+
+          # Deduplicate
+          PACKAGES=$(echo "$PACKAGES" | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/ $//')
+          echo "packages=$PACKAGES" >> "$GITHUB_OUTPUT"
+          echo "has_changes=$HAS_CHANGES" >> "$GITHUB_OUTPUT"
+
+  # ── Build and test on every push ────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+  # ── Version bump (only if packages changed + build passed) ─────────────────
+  version:
+    name: Version bump
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build]
+    if: needs.detect-changes.outputs.has-changes == 'true'
+    outputs:
+      tag: v${{ steps.version.outputs.version }}
+      has-version-bump: ${{ steps.version.outputs.bumped }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Create changeset for changed packages
+        run: |
+          PACKAGES="${{ needs.detect-changes.outputs.packages }}"
+          echo "Packages that changed: $PACKAGES"
+
+          # Generate a changeset file for each changed package
+          for PKG in $PACKAGES; do
+            case "$PKG" in
+              orca-lang) NAME="@orcalang/orca-lang" ;;
+              runtime-ts) NAME="@orcalang/orca-runtime-ts" ;;
+              mcp-server) NAME="@orcalang/orca-mcp-server" ;;
+              runtime-python) NAME="orca-runtime-python" ;;
+              runtime-go) NAME="github.com/jascal/orca-lang/packages/runtime-go" ;;
+            esac
+            echo "Creating changeset for: $NAME"
+            # Use patch bump by default; changesets will determine minor/major from PR titles
+            echo -e "---\n\"$NAME\": patch\n---\n\nBump $NAME" > .changeset/ci-${PKG}.md
+          done
+
+      - name: Run changesets version
+        id: version
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Check if there are changeset files
+          if ls .changeset/*.md 2>/dev/null | grep -v README.md > /dev/null; then
+            echo "Running changesets version..."
+            pnpm changeset version
+
+            # Get the new version
+            VERSION=$(node -p "require('./packages/orca-lang/package.json').version")
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No changeset files found, skipping version bump"
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push version bump commit
+        if: steps.version.outputs.bumped == 'true'
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          git push origin HEAD:${{ github.ref_name }}
+
+          # Tag and push
+          git tag "v${VERSION}"
+          git push origin "v${VERSION}"
