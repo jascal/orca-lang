@@ -123,9 +123,9 @@ jobs:
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
             echo "Already published ${PKG}@${VER}, skipping"
           else
-            pnpm publish --access public --no-git-checks
+            # Publish from monorepo root so pnpm can rewrite workspace:* to actual versions
+            pnpm publish --filter @orcalang/orca-mcp-server --access public --no-git-checks
           fi
-        working-directory: packages/mcp-server
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

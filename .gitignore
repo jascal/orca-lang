@@ -7,3 +7,4 @@ __pycache__/
 .next/
 *.tsbuildinfo
 .serena/
+.mcp.json

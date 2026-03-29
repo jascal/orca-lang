@@ -1432,6 +1432,237 @@ Output ONLY the complete multi-machine Orca definition in .orca.md markdown form
   };
 }
 
+// ── Shared provider resolution ────────────────────────────────────────────────
+
+function tryCreateProvider(configPath?: string): { provider: LLMProvider; config: ReturnType<typeof loadConfig> } | { error: string } {
+  const config = loadConfig(configPath);
+  const isMiniMax = config.base_url?.includes('minimaxi.chat') || config.base_url?.includes('minimax.io');
+  const anthropicKey = isMiniMax
+    ? (config.api_key || process.env.MINIMAX_API_KEY || process.env.ANTHROPIC_API_KEY)
+    : (config.api_key || process.env.ANTHROPIC_API_KEY);
+  const openaiKey = config.api_key || process.env.OPENAI_API_KEY;
+  const hasKey =
+    config.provider === 'openai' ? openaiKey :
+    config.provider === 'ollama' ? true :
+    anthropicKey;
+
+  if (!hasKey) {
+    const keyName = config.provider === 'openai' ? 'OPENAI_API_KEY'
+      : isMiniMax ? 'MINIMAX_API_KEY (or ANTHROPIC_API_KEY)'
+      : 'ANTHROPIC_API_KEY';
+    return { error: `No API key available. Set ${keyName} in your environment or .env` };
+  }
+
+  return {
+    config,
+    provider: createProvider(config.provider, {
+      api_key: config.api_key,
+      base_url: config.base_url,
+      model: config.model,
+      max_tokens: config.max_tokens,
+      temperature: config.temperature,
+    }),
+  };
+}
+
+// ── /generate-machine (single draft step, no verify loop) ────────────────────
+
+export interface GenerateOrcaDraftResult {
+  status: 'success' | 'error';
+  machine?: string;   // parsed from draft for caller convenience
+  orca?: string;
+  error?: string;
+}
+
+export async function generateOrcaDraftSkill(
+  naturalLanguageSpec: string,
+  configPath?: string,
+): Promise<GenerateOrcaDraftResult> {
+  const providerResult = tryCreateProvider(configPath);
+  if ('error' in providerResult) {
+    return { status: 'error', error: providerResult.error };
+  }
+  const { provider } = providerResult;
+
+  const systemPrompt = `You are an expert in Orca state machine design. Generate Orca machine definitions in markdown (.orca.md) format from natural language descriptions.
+
+${ORCA_SYNTAX_REFERENCE}
+
+IMPORTANT - Guard Restrictions:
+- Guards support ONLY: comparisons (< > == != <= >=), null checks, boolean operators
+- NO method calls: do NOT use .contains(), .includes(), .length(), etc.
+- For arrays, check .length > 0 or compare to null
+- If you need complex logic, compute it in an action and store a boolean flag in context
+
+IMPORTANT - Action Syntax:
+- The actions table declares ONLY SIGNATURES (names and types), not implementations
+- Write signatures in backticks: \`(ctx) -> Context\`
+- NEVER write action bodies
+- Transitions reference actions by name only
+
+Important rules:
+- Always include exactly ONE initial state marked with [initial]
+- Final states should be marked with [final]
+- Every (state, event) pair must have a transition OR the event must be ignored
+- Use guards for conditional transitions
+- Context should contain all data needed for guards and actions
+- For effects (API calls, I/O), use Effect<T> return type in the signature
+
+Output ONLY the Orca machine definition in .orca.md markdown format, wrapped in a code fence, with no additional text.`;
+
+  try {
+    const response = await provider.complete({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Generate an Orca state machine for:\n${naturalLanguageSpec}` },
+      ],
+      model: '',
+      max_tokens: 4096,
+      temperature: 0.5,
+    });
+
+    const orca = stripCodeFence(response.content);
+    const machine = extractMachineNameFromSource(orca);
+    return { status: 'success', machine, orca };
+  } catch (err) {
+    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── /generate-multi-machine (single draft step, no verify loop) ───────────────
+
+export interface GenerateOrcaMultiDraftResult {
+  status: 'success' | 'error';
+  machines?: string[];   // machine names parsed from draft
+  orca?: string;
+  error?: string;
+}
+
+export async function generateOrcaMultiDraftSkill(
+  naturalLanguageSpec: string,
+  configPath?: string,
+): Promise<GenerateOrcaMultiDraftResult> {
+  const providerResult = tryCreateProvider(configPath);
+  if ('error' in providerResult) {
+    return { status: 'error', error: providerResult.error };
+  }
+  const { provider } = providerResult;
+
+  const systemPrompt = `You are an expert in Orca state machine design. Generate coordinated multi-machine Orca definitions in markdown (.orca.md) format from natural language descriptions.
+
+${ORCA_SYNTAX_REFERENCE}
+${MULTI_MACHINE_SYNTAX_ADDENDUM}
+
+IMPORTANT - Guard Restrictions:
+- Guards support ONLY: comparisons (< > == != <= >=), null checks, boolean operators
+- NO method calls: do NOT use .contains(), .includes(), .length(), etc.
+- If you need complex logic, compute it in an action and store a boolean flag in context
+
+IMPORTANT - Action Syntax:
+- The actions table declares ONLY SIGNATURES (names and types), not implementations
+- Write signatures in backticks: \`(ctx) -> Context\`
+- NEVER write action bodies
+
+Multi-machine design principles:
+- Design a clear coordinator machine that delegates to focused child machines
+- Each child machine should have a single responsibility and at least one [final] state
+- Use invoke: in coordinator states to call child machines
+- Separate machines with --- on its own line
+- Name machines clearly (e.g. OrderCoordinator, PaymentProcessor, NotificationSender)
+
+Output ONLY the complete multi-machine Orca definition in .orca.md markdown format, wrapped in a code fence, with no additional text.`;
+
+  try {
+    const response = await provider.complete({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Generate a multi-machine Orca state machine system for:\n${naturalLanguageSpec}\n\nDesign at least 2 coordinated machines separated by ---` },
+      ],
+      model: '',
+      max_tokens: 8192,
+      temperature: 0.5,
+    });
+
+    const orca = stripCodeFence(response.content);
+    let machines: string[] = [];
+    try {
+      const { file } = parseMarkdown(orca);
+      machines = file.machines.map(m => m.name);
+    } catch { /* ignore parse errors — caller will see them via verify_machine */ }
+    return { status: 'success', machines, orca };
+  } catch (err) {
+    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Auto-routing: single vs multi-machine heuristic ──────────────────────────
+
+/**
+ * Returns true when the spec clearly describes coordination between multiple
+ * independent sub-machines rather than a single workflow with many states.
+ *
+ * Conservative by design — single-machine handles most workflows well.
+ * Only routes to multi when the spec explicitly uses coordination vocabulary
+ * or describes a named coordinator managing distinct child processes.
+ */
+export function detectMultiMachine(spec: string): boolean {
+  const lower = spec.toLowerCase();
+
+  // 1. Explicit coordinator / orchestrator vocabulary
+  if (/\b(coordinator|orchestrator|orchestrate)\b/.test(lower)) return true;
+
+  // 2. Explicit multi-machine phrasing
+  if (/multi.?machine|multiple machines|child machine|sub.?machine/.test(lower)) return true;
+
+  // 3. Coordination pattern: "X coordinates/manages/oversees Y and Z"
+  //    where the sub-things sound like independent workflows
+  if (/\b(coordinate[sd]?|orchestrate[sd]?|manages?|oversees?)\b.{0,120}\band\b.{0,80}\b(machine|workflow|pipeline|process|worker|agent)\b/i.test(spec)) return true;
+
+  return false;
+}
+
+export interface GenerateAutoResult {
+  status: 'success' | 'error';
+  is_multi: boolean;
+  machine?: string;      // single-machine: name of the machine
+  machines?: string[];   // multi-machine: names of all machines
+  orca?: string;
+  error?: string;
+}
+
+/**
+ * Auto-routing entry point for generate_machine.
+ * Inspects the spec and delegates to the single- or multi-machine draft
+ * generator. Always returns a draft — caller should follow up with
+ * verify_machine → refine_machine (if errors) → verify_machine.
+ */
+export async function generateAutoSkill(
+  naturalLanguageSpec: string,
+  configPath?: string,
+): Promise<GenerateAutoResult> {
+  const isMulti = detectMultiMachine(naturalLanguageSpec);
+
+  if (isMulti) {
+    const result = await generateOrcaMultiDraftSkill(naturalLanguageSpec, configPath);
+    return {
+      status: result.status,
+      is_multi: true,
+      machines: result.machines,
+      orca: result.orca,
+      error: result.error,
+    };
+  } else {
+    const result = await generateOrcaDraftSkill(naturalLanguageSpec, configPath);
+    return {
+      status: result.status,
+      is_multi: false,
+      machine: result.machine,
+      orca: result.orca,
+      error: result.error,
+    };
+  }
+}
+
 function stripCodeFence(code: string): string {
   return code
     .replace(/<think>[\s\S]*?<\/think>/gi, '')

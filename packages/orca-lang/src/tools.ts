@@ -57,17 +57,13 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'generate_machine',
     description:
-      'Generate an Orca machine definition from a natural language specification. Requires LLM configuration via environment variables (ANTHROPIC_API_KEY, etc.). Loops up to max_iterations to produce a valid machine.',
+      'Generate a draft Orca machine definition from a natural language specification. Automatically chooses between a single-machine or multi-machine design based on the spec: specs that mention a coordinator, orchestrator, or multiple independently-lifecycled sub-processes route to multi-machine; everything else produces a single machine. Returns raw .orca.md source and an is_multi flag. Always call verify_machine on the result next — then refine_machine if there are errors. Requires LLM configuration via environment variables (ANTHROPIC_API_KEY, etc.).',
     inputSchema: {
       type: 'object',
       properties: {
         spec: {
           type: 'string',
           description: 'Natural language description of the desired state machine',
-        },
-        max_iterations: {
-          type: 'number',
-          description: 'Maximum refinement iterations (default: 3)',
         },
       },
       required: ['spec'],
@@ -101,17 +97,13 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'generate_multi_machine',
     description:
-      'Generate a coordinated set of Orca machines from a natural language specification. Returns multiple machine definitions in one .orca.md file (separated by ---) that pass the cross-machine verifier. Requires LLM configuration via environment variables.',
+      'Generate a draft set of coordinated Orca machines from a natural language specification. Returns multiple machine definitions in one .orca.md file (separated by ---). Always call verify_machine on the result next — then refine_machine if there are errors. Requires LLM configuration via environment variables.',
     inputSchema: {
       type: 'object',
       properties: {
         spec: {
           type: 'string',
           description: 'Natural language description of the desired multi-machine system',
-        },
-        max_iterations: {
-          type: 'number',
-          description: 'Maximum refinement iterations (default: 3)',
         },
       },
       required: ['spec'],

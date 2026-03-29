@@ -13,8 +13,8 @@ import {
   compileSkill,
   generateActionsSkill,
   refineSkill,
-  generateOrcaSkill,
-  generateOrcaMultiSkill,
+  generateAutoSkill,
+  generateOrcaMultiDraftSkill,
   type SkillError,
   ORCA_SYNTAX_REFERENCE,
   MULTI_MACHINE_SYNTAX_ADDENDUM,
@@ -34,7 +34,9 @@ const TOOLS = ORCA_TOOLS as unknown as Tool[];
 
 const MCP_INSTRUCTIONS = `This MCP server exposes Orca state machine tools. Orca is a markdown-based state machine language designed for LLM code generation.
 
-Recommended workflow: generate_machine (or write source manually) → verify_machine → refine_machine (if errors) → compile_machine → generate_actions.
+Recommended workflow: generate_machine → verify_machine → refine_machine (if errors) → verify_machine → compile_machine → generate_actions.
+
+Each step is a discrete tool call so progress is visible between calls. generate_machine returns a draft; always call verify_machine next to check it.
 
 ${ORCA_SYNTAX_REFERENCE}
 
@@ -62,14 +64,12 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
 
     case 'generate_machine': {
       const spec = args.spec as string;
-      const maxIterations = (args.max_iterations as number) ?? 3;
-      return generateOrcaSkill(spec, undefined, maxIterations);
+      return generateAutoSkill(spec);
     }
 
     case 'generate_multi_machine': {
       const spec = args.spec as string;
-      const maxIterations = (args.max_iterations as number) ?? 3;
-      return generateOrcaMultiSkill(spec, undefined, maxIterations);
+      return generateOrcaMultiDraftSkill(spec);
     }
 
     case 'generate_actions': {

@@ -368,3 +368,128 @@ All in `packages/orca-lang/examples/`:
 | `hierarchical-game.orca.md` | Nested compound states |
 | `parallel-order.orca.md` | Parallel regions with sync |
 | `payment-with-properties.orca.md` | Bounded model checking properties |
+
+---
+
+## Skills & MCP setup
+
+Orca ships six Claude Code skills backed by the `@orcalang/orca-mcp-server` MCP server. The skills call MCP tools directly — no shell or file access needed.
+
+| Skill | Trigger | What it does |
+|-------|---------|--------------|
+| `/orca-generate` | `<spec>` | Generate a verified machine from a natural language spec |
+| `/orca-generate-multi` | `<spec>` | Generate a coordinated multi-machine system |
+| `/orca-verify` | `[file]` | Verify a machine for errors and warnings |
+| `/orca-refine` | `[file]` | Auto-fix verification errors using an LLM |
+| `/orca-compile` | `[xstate\|mermaid] [file]` | Compile to XState TypeScript or Mermaid |
+| `/orca-actions` | `[typescript\|python\|go] [file]` | Generate action scaffold stubs |
+
+Skills that use an LLM (`/orca-generate`, `/orca-generate-multi`, `/orca-refine`, and optionally `/orca-actions --use-llm`) call the MCP server, which calls your configured LLM provider. Skills that are purely structural (`/orca-verify`, `/orca-compile`, plain `/orca-actions`) never make LLM calls.
+
+### MCP server environment variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ORCA_API_KEY` | Yes | API key for your LLM provider |
+| `ORCA_PROVIDER` | Yes | `anthropic`, `openai`, `ollama`, or `grok` |
+| `ORCA_BASE_URL` | No | Override the provider's default base URL (for OpenAI-compatible APIs) |
+| `ORCA_MODEL` | No | Model name (defaults to `claude-sonnet-4-6` for Anthropic) |
+
+Use `ORCA_PROVIDER=openai` with `ORCA_BASE_URL` for any OpenAI-compatible provider (MiniMax, Together, local vLLM, etc.).
+
+---
+
+### Claude Desktop
+
+Add the `orca` server to your Claude Desktop config file:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "npx",
+      "args": ["-y", "@orcalang/orca-mcp-server"],
+      "env": {
+        "ORCA_API_KEY": "<your-api-key>",
+        "ORCA_PROVIDER": "anthropic"
+      }
+    }
+  }
+}
+```
+
+For an OpenAI-compatible provider (e.g. MiniMax):
+
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "npx",
+      "args": ["-y", "@orcalang/orca-mcp-server"],
+      "env": {
+        "ORCA_API_KEY": "<your-api-key>",
+        "ORCA_PROVIDER": "openai",
+        "ORCA_BASE_URL": "https://api.minimaxi.chat/v1",
+        "ORCA_MODEL": "MiniMax-M2.7"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop after editing. Skills in `.claude/skills/` are discovered automatically when you open this repo.
+
+---
+
+### Claude Code
+
+Claude Code reads MCP server config from `.mcp.json` at the project root. This file is gitignored because it contains credentials — each developer creates their own.
+
+**Option A — use the published package** (same as Desktop, no rebuild needed):
+
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "npx",
+      "args": ["-y", "@orcalang/orca-mcp-server"],
+      "type": "stdio",
+      "env": {
+        "ORCA_API_KEY": "<your-api-key>",
+        "ORCA_PROVIDER": "anthropic"
+      }
+    }
+  }
+}
+```
+
+**Option B — use the local build** (recommended for development — changes take effect after rebuild):
+
+```json
+{
+  "mcpServers": {
+    "orca": {
+      "command": "node",
+      "args": ["/absolute/path/to/orca-lang/packages/mcp-server/dist/server.js"],
+      "type": "stdio",
+      "env": {
+        "ORCA_API_KEY": "<your-api-key>",
+        "ORCA_PROVIDER": "anthropic"
+      }
+    }
+  }
+}
+```
+
+Build (or rebuild after changes):
+
+```bash
+pnpm --filter @orcalang/orca-mcp-server build
+# or from the package directory:
+cd packages/mcp-server && npx tsc
+```
+
+Create `.mcp.json` at the project root (it is already in `.gitignore`), then restart Claude Code. Skills are auto-discovered from `.claude/skills/` — no additional configuration needed.
