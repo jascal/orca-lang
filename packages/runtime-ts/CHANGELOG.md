@@ -1,5 +1,13 @@
 # @orcalang/orca-runtime-ts
 
+## 0.1.10
+
+### Patch Changes
+
+- chore: version bump
+
+---
+
 ## 0.1.9
 
 ### Patch Changes

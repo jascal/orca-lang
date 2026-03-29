@@ -6,6 +6,17 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.10] — 2026-03-29
+
+### Added
+
+- `key-exchange.orca.md` example: three-machine client/server key exchange protocol (Coordinator, Client, Server) with timeouts and error paths
+- `server.json`: MCP registry manifest for `@orcalang/orca-mcp-server` — fixes `Publish to MCP Registry` CI step
+- `README.md`: Background section covering the name origin (disambiguation from Hundred Rabbits' Orca music sequencer) and the relationship to the halting problem
+- 20 tests for the key-exchange example covering parsing, structural verification, completeness, cross-machine analysis, Mermaid compilation, and round-trip
+
+---
+
 ## [v0.1.9] — 2026-03-29
 
 ### Fixed

@@ -1,5 +1,13 @@
 # @orcalang/orca-mcp-server
 
+## 0.1.10
+
+### Patch Changes
+
+- fix: add `server.json` MCP registry manifest — resolves `server.json not found` error in `Publish to MCP Registry` CI step
+
+---
+
 ## 0.1.9
 
 ### Patch Changes

@@ -1,5 +1,15 @@
 # @orcalang/orca-lang
 
+## 0.1.10
+
+### Patch Changes
+
+- feat(examples): add `key-exchange.orca.md` — three-machine client/server key exchange protocol (Coordinator, Client, Server)
+- feat(tests): 20 tests for key-exchange example covering parsing, verification, completeness, cross-machine analysis, Mermaid compilation, and round-trip
+- docs: README Background section — name origin, Orca music sequencer disambiguation, halting problem relationship
+
+---
+
 ## 0.1.9
 
 ### Patch Changes

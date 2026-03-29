@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.jascal/orca-mcp-server",
+  "title": "Orca MCP Server",
+  "description": "Go from natural language to verified finite state machines — topology bugs caught before code runs.",
+  "version": "0.1.9",
+  "repository": {
+    "url": "https://github.com/jascal/orca-lang",
+    "source": "github",
+    "id": "1189955224",
+    "subfolder": "packages/mcp-server"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@orcalang/orca-mcp-server",
+      "version": "0.1.10",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeHint": "npx",
+      "environmentVariables": [
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "description": "Anthropic API key for LLM-powered tools (generate_machine, generate_multi_machine, refine_machine, generate_actions with use_llm). Not required for parse_machine, verify_machine, compile_machine, or server_status.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "ORCA_PROVIDER",
+          "description": "LLM provider to use: anthropic (default), openai, grok, or ollama.",
+          "isRequired": false,
+          "default": "anthropic"
+        },
+        {
+          "name": "ORCA_MODEL",
+          "description": "Model name to use for LLM tools. Defaults to claude-sonnet-4-6 for Anthropic.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

@@ -611,6 +611,7 @@ describe('Round-trip: Markdown → AST → Markdown → AST (idempotency)', () =
     const { first, second } = roundTripMd(source);
     expect(stripParentsAndTokens(second)).toEqual(stripParentsAndTokens(first));
   });
+
 });
 
 describe('## effects section', () => {

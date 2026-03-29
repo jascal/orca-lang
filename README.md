@@ -368,6 +368,7 @@ All in `packages/orca-lang/examples/`:
 | `hierarchical-game.orca.md` | Nested compound states |
 | `parallel-order.orca.md` | Parallel regions with sync |
 | `payment-with-properties.orca.md` | Bounded model checking properties |
+| `key-exchange.orca.md` | Multi-machine: client/server key exchange protocol |
 
 ---
 
@@ -493,3 +494,23 @@ cd packages/mcp-server && npx tsc
 ```
 
 Create `.mcp.json` at the project root (it is already in `.gitignore`), then restart Claude Code. Skills are auto-discovered from `.claude/skills/` — no additional configuration needed.
+
+---
+
+## Background
+
+### Why "Orca"?
+
+The name comes from **Orc**hestrated (state machine language), but the whale was in mind too: orcas are highly coordinated, hunt in structured pods, and divide roles precisely — which maps well to a multi-machine system where a coordinator directs child machines through well-defined protocols.
+
+**Disambiguation:** There is another project called [Orca](https://100r.co/site/orca.html) — a visual live-coding environment for sequencing MIDI and audio events, built by Hundred Rabbits. It's excellent, completely unrelated, and worth knowing about if you work in music or creative coding. This project is a different thing entirely: a state machine language for software orchestration.
+
+### Does this sidestep the halting problem?
+
+Yes, deliberately — and that's the point.
+
+The halting problem says you cannot decide in general whether an arbitrary program will terminate. That result applies to Turing-complete computations. Finite state machines are not Turing-complete: they have a finite, explicitly enumerated set of states and transitions declared upfront, with no unbounded loops or dynamic control flow in the topology itself. Reachability and deadlock analysis on an FSM is just graph traversal — it always terminates in O(states + transitions).
+
+Orca's verifier exploits this by only verifying the *topology* layer — the state machine structure — where decidability is guaranteed. It does not attempt to verify the *computation* layer — the action functions you write inside each state. Those functions can be as complex as you like, and Orca makes no claims about them.
+
+The practical consequence: the verifier can give you hard guarantees about your program's control flow (every state is reachable, no deadlocks, every event is handled, guards are mutually exclusive) without requiring your business logic to be formally specified. The two-layer separation is what makes this tractable. You get real structural correctness, scoped to the part of the program that can actually be checked.
