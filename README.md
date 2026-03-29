@@ -443,6 +443,15 @@ For an OpenAI-compatible provider (e.g. MiniMax):
 
 Restart Claude Desktop after editing. Skills in `.claude/skills/` are discovered automatically when you open this repo.
 
+> **Node.js version** — Claude Desktop uses its own bundled Node.js, which may be older than the Node 18+ required by this package (ESM). If the server fails to start, add a `PATH` entry to `env` that puts your system Node's `bin` directory first — this is the most reliable way to ensure the right `npx` is found:
+> ```json
+> "env": {
+>   "PATH": "/usr/local/bin:/usr/bin:/bin",
+>   "ORCA_API_KEY": "..."
+> }
+> ```
+> Run `dirname $(which npx)` to find the correct path. On nvm it will be something like `~/.nvm/versions/node/v22.x.x/bin`.
+
 ---
 
 ### Claude Code
@@ -494,6 +503,15 @@ cd packages/mcp-server && npx tsc
 ```
 
 Create `.mcp.json` at the project root (it is already in `.gitignore`), then restart Claude Code. Skills are auto-discovered from `.claude/skills/` — no additional configuration needed.
+
+> **Node.js version** — Claude Code may use an older Node.js than the Node 18+ required by this package (ESM). If the server fails to start, add a `PATH` entry to `env` that puts your system Node's `bin` directory first:
+> ```json
+> "env": {
+>   "PATH": "/usr/local/bin:/usr/bin:/bin",
+>   "ORCA_API_KEY": "..."
+> }
+> ```
+> Run `dirname $(which npx)` to find the correct path. On nvm it will be something like `~/.nvm/versions/node/v22.x.x/bin`.
 
 ---
 
