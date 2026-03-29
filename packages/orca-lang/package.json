@@ -1,6 +1,6 @@
 {
   "name": "@orcalang/orca-lang",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "description": "Orca (Orchestrated State Machine Language) - an LLM-native code generation target",
   "type": "module",
   "main": "dist/index.js",
