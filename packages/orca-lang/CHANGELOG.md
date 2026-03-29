@@ -1,5 +1,11 @@
 # @orcalang/orca-lang
 
+## 0.1.6
+
+### Patch Changes
+
+- feat(mcp): add `server_status` tool — returns version, active config, and `api_key_configured` boolean (credentials never exposed)
+
 ## 0.1.5
 
 ### Patch Changes

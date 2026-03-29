@@ -6,6 +6,14 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.6] — 2026-03-29
+
+### Added
+
+- `server_status` MCP tool: returns server version, Node.js version, active LLM config (provider, model, base_url, code_generator, max_tokens, temperature), and `api_key_configured` boolean. API keys and credentials are never included in the response.
+
+---
+
 ## [v0.1.5] — 2026-03-29
 
 ### Fixed

@@ -1,7 +1,7 @@
 {
   "name": "@orcalang/orca-mcp-server",
-  "version": "0.1.5",
-  "description": "MCP server exposing Orca state machine tools — parse, verify, compile, generate, refine",
+  "version": "0.1.7",
+  "description": "LLM agents can now build verified state machines. Generate, parse, verify, and compile Orca state machines from natural language specs — topology guarantees before any code runs.",
   "type": "module",
   "main": "dist/server.js",
   "bin": {

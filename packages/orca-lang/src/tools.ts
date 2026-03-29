@@ -133,4 +133,14 @@ export const ORCA_TOOLS: ToolDef[] = [
       required: ['source'],
     },
   },
+  {
+    name: 'server_status',
+    description:
+      'Return the MCP server version and active configuration. API keys are never included in the response — only whether a key is configured. Use this to confirm the server is running and check which LLM provider and model are active.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+  },
 ];

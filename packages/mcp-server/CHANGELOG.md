@@ -1,5 +1,13 @@
 # @orcalang/orca-mcp-server
 
+## 0.1.6
+
+### Patch Changes
+
+- feat(mcp): add `server_status` tool — returns server version, Node.js version, active LLM config (provider, model, base_url, code_generator, max_tokens, temperature), and `api_key_configured` boolean; API keys are never included in the response
+- Updated dependencies
+  - @orcalang/orca-lang@0.1.6
+
 ## 0.1.5
 
 ### Patch Changes

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from 'module';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -20,6 +21,9 @@ import {
   MULTI_MACHINE_SYNTAX_ADDENDUM,
 } from '@orcalang/orca-lang/skills';
 import { ORCA_TOOLS } from '@orcalang/orca-lang/tools';
+
+const _require = createRequire(import.meta.url);
+const { version: SERVER_VERSION } = _require('../package.json') as { version: string };
 
 // ── Node.js version check ─────────────────────────────────────────────────────
 const [major] = process.version.slice(1).split('.').map(Number);
@@ -95,6 +99,25 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
       }
 
       return refineSkill({ source }, errors, undefined, maxIterations);
+    }
+
+    case 'server_status': {
+      const apiKeyConfigured =
+        !!(process.env.ORCA_API_KEY ||
+           process.env.ANTHROPIC_API_KEY ||
+           process.env.OPENAI_API_KEY ||
+           process.env.MINIMAX_API_KEY);
+      return {
+        version: SERVER_VERSION,
+        node_version: process.version,
+        provider: process.env.ORCA_PROVIDER ?? 'anthropic',
+        model: process.env.ORCA_MODEL ?? 'claude-sonnet-4-6',
+        base_url: process.env.ORCA_BASE_URL ?? null,
+        code_generator: process.env.ORCA_CODE_GENERATOR ?? 'typescript',
+        max_tokens: process.env.ORCA_MAX_TOKENS ? parseInt(process.env.ORCA_MAX_TOKENS, 10) : 4096,
+        temperature: process.env.ORCA_TEMPERATURE ? parseFloat(process.env.ORCA_TEMPERATURE) : 0.7,
+        api_key_configured: apiKeyConfigured,
+      };
     }
 
     default:

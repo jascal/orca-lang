@@ -183,6 +183,19 @@ jobs:
           git tag -f "packages/runtime-go/v${{ steps.version.outputs.version }}"
           git push --force origin "packages/runtime-go/v${{ steps.version.outputs.version }}"
 
+  # ── MCP Registry ─────────────────────────────────────────────────────────────
+  publish-mcp-registry:
+    name: Publish to MCP Registry
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: publish-npm-mcp-server
+    permissions:
+      id-token: write  # required for OIDC auth to registry
+    steps:
+      - uses: modelcontextprotocol/publisher/.github/actions/publish@v1
+        with:
+          npm-token: ${{ secrets.NPM_TOKEN }}
+
   # ── GitHub Release notes ─────────────────────────────────────────────────────
   create-release:
     name: Create GitHub Release
