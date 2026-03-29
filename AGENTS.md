@@ -35,23 +35,25 @@ npm install -g @orcalang/orca-mcp-server
 npx @orcalang/orca-mcp-server
 ```
 
-Configure in your MCP host (e.g. Claude Desktop `claude_desktop_config.json`):
+Configure in your MCP host (e.g. Claude Code `settings.json` or project `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "orca": {
       "command": "npx",
-      "args": ["@orcalang/orca-mcp-server"],
+      "args": ["-y", "@orcalang/orca-mcp-server"],
       "env": {
-        "ANTHROPIC_API_KEY": "..."
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
       }
     }
   }
 }
 ```
 
-The server speaks the [Model Context Protocol](https://modelcontextprotocol.io) over stdio. It exposes all 7 tools with full JSON schemas.
+`${VAR}` syntax passes your shell's `ANTHROPIC_API_KEY` environment variable into the MCP server process. Make sure it is set before starting Claude Code.
+
+The server speaks the [Model Context Protocol](https://modelcontextprotocol.io) over stdio. It exposes all 7 tools with full JSON schemas. The server requires **Node.js 20+** and exits with a clear error on older versions.
 
 ### CLI (for agent frameworks that use subprocesses)
 
@@ -150,6 +152,16 @@ scaffolds = generate_actions(source=source, lang="typescript")
 ---
 
 ## Handling LLM Auth
+
+| Tool | Calls LLM | Requires `ANTHROPIC_API_KEY` |
+|------|-----------|------------------------------|
+| `parse_machine` | No | No |
+| `verify_machine` | No | No |
+| `compile_machine` | No | No |
+| `generate_machine` | Yes | Yes |
+| `generate_multi_machine` | Yes | Yes |
+| `generate_actions` | Only if `use_llm: true` | Yes (if LLM enabled) |
+| `refine_machine` | Yes | Yes |
 
 `generate_machine`, `generate_multi_machine`, and `refine_machine` call an LLM. Configure via environment variables:
 
