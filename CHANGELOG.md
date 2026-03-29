@@ -6,6 +6,15 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.11] — 2026-03-29
+
+### Fixed
+
+- `packages/mcp-server/package.json`: add required `mcpName` field (`io.github.jascal/orca-mcp-server`) for MCP registry validation
+- `release.yml`: add `mcp-publisher login github-oidc` step before publish; add missing `actions/checkout` to `publish-mcp-registry` job
+
+---
+
 ## [v0.1.10] — 2026-03-29
 
 ### Added

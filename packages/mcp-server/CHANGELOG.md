@@ -1,5 +1,13 @@
 # @orcalang/orca-mcp-server
 
+## 0.1.11
+
+### Patch Changes
+
+- fix: add `mcpName` field to package.json required for MCP registry publication
+
+---
+
 ## 0.1.10
 
 ### Patch Changes
