@@ -167,9 +167,9 @@ jobs:
     name: Tag Go module
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    # Uses a PAT (not GitHub App token) for git tag push
     permissions:
       contents: write
-      workflows: write
     steps:
       - uses: actions/checkout@v4
 
@@ -178,6 +178,8 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Push Go module tag
+        env:
+          GH_TOKEN: ${{ secrets.GO_MODULE_PAT }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -191,12 +193,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: publish-npm-mcp-server
     permissions:
-      id-token: write  # required for OIDC auth to registry
+      id-token: write
+      contents: read
     steps:
       - name: Download mcp-publisher
         run: |
           VERSION=$(curl -s https://api.github.com/repos/modelcontextprotocol/registry/releases/latest | grep -o '"tag_name": "v[^"]*' | cut -d'"' -f4)
           curl -sL "https://github.com/modelcontextprotocol/registry/releases/download/${VERSION}/linux_amd64.tar.gz" | tar xz
+          chmod +x mcp-publisher
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish --npm-token=${{ secrets.NPM_TOKEN }}
 
@@ -211,7 +215,6 @@ jobs:
       - publish-npm-runtime-ts
       - publish-npm-mcp-server
       - publish-pypi
-      - tag-go
     permissions:
       contents: write
     steps:
