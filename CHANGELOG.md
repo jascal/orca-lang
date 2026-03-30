@@ -6,6 +6,20 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.15] — 2026-03-29
+
+### Added
+
+- `packages/mcp-server`: MCP resources expose `orca://examples/{name}` URIs (live `.orca.md` file contents), `orca://syntax` (language reference), and `orca://help` (quick-start guide) — clients that support MCP resources can now browse examples and docs inline
+- `packages/mcp-server`: Compact tool instructions and enriched tool descriptions for better LLM agent ergonomics
+- `packages/orca-lang/examples/saas-auth.orca.md`: SaaS authentication machine — 9 states covering anonymous → registration → email verification → login → authenticated → password reset → account lockout flow with guards and actions
+
+### Docs
+
+- `packages/mcp-server/README.md`: document Node.js ≥ 18 requirement and workaround for Claude Desktop's bundled Node.js version mismatch
+
+---
+
 ## [v0.1.13] — 2026-03-29
 
 ### Fixed
