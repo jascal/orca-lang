@@ -6,6 +6,21 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.18] — 2026-03-30
+
+### Added
+
+- `packages/runtime-python`: production hardening — Gap 1–4, M-1, M-2
+  - **Gap 1**: `snapshot()` now includes `"machine"` and `"definition_version"` fields, making snapshots self-describing for external storage
+  - **Gap 2**: `send()` before `start()`/`resume()` raises `MachineNotActiveError` instead of silently returning `taken=False`, surfacing sequencing bugs at the call site
+  - **Gap 3**: `AsyncPersistenceAdapter` Protocol for async database/network backends; `OrcaMachine` accepts sync or async adapter (auto-detected via `iscoroutinefunction`), auto-saves after every transition, gains `load_or_start()` convenience method
+  - **Gap 4**: `MachineDef.version` field (default `"0.1.0"`), parsed from `- version: X.Y.Z` bullet under `# machine` heading; `resume()` emits a `UserWarning` when snapshot version does not match the current definition version
+  - **M-1**: `_validate_machine_def()` runs after parsing — checks for states, an `[initial]` state, valid transition sources/targets, and defined guards (stripping `!` negation prefix before lookup)
+  - **M-2**: `TransitionResult.to_state_leaf` exposes the leaf state name directly, avoiding dot-notation parsing for compound state callers
+- 18 new tests in `test_production_hardening.py`; all 87 runtime-python tests pass
+
+---
+
 ## [v0.1.17] — 2026-03-29
 
 ### Fixed
