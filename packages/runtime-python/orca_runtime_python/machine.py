@@ -34,6 +34,7 @@ from .types import (
     InvokeDef,
 )
 from .bus import EventBus, Event, EventType, get_event_bus
+from .persistence import PersistenceAdapter, AsyncPersistenceAdapter
 
 
 # Type alias for transition callback
@@ -43,12 +44,24 @@ TransitionCallback = Callable[[StateValue, StateValue], Awaitable[None]]
 ActionHandler = Callable[..., Any]  # async (dict, dict|None) -> dict|None
 
 
+class MachineNotActiveError(RuntimeError):
+    """
+    Raised when send() is called on a machine that has not been started
+    or has already been stopped.
+
+    Always indicates a caller-side sequencing error. The fix is to ensure
+    start() or resume() completes before any send() call reaches this machine.
+    """
+    pass
+
+
 @dataclass
 class TransitionResult:
     """Result of a transition attempt."""
     taken: bool
     from_state: str
     to_state: str | None = None
+    to_state_leaf: str | None = None
     guard_failed: bool = False
     error: str | None = None
 
@@ -80,6 +93,8 @@ class OrcaMachine:
         event_bus: EventBus | None = None,
         context: dict[str, Any] | None = None,
         on_transition: TransitionCallback | None = None,
+        persistence: PersistenceAdapter | AsyncPersistenceAdapter | None = None,
+        run_id: str | None = None,
     ):
         self.definition = definition
         self.event_bus = event_bus or get_event_bus()
@@ -91,6 +106,10 @@ class OrcaMachine:
         self._active: bool = False
         self._action_handlers: dict[str, ActionHandler] = {}
         self._timeout_task: asyncio.Task | None = None
+
+        # Persistence
+        self._persistence = persistence
+        self._run_id = run_id
 
         # Child machine management
         self._child_machines: dict[str, OrcaMachine] = {}
@@ -120,14 +139,16 @@ class OrcaMachine:
     def snapshot(self) -> dict[str, Any]:
         """
         Capture the current machine state as a serializable snapshot.
-        The snapshot includes state value, context, and timestamp.
-        Child machine snapshots are included.
+        The snapshot includes machine name, definition version, state value,
+        context, and timestamp. Child machine snapshots are included.
         Action handlers are NOT included — re-register them after restore.
         """
         import copy
         import time
         state_val = self._state.value
         return {
+            "machine": self.definition.name,
+            "definition_version": self.definition.version,
             "state": copy.deepcopy(state_val),
             "context": copy.deepcopy(self.context),
             "children": {k: m.snapshot() for k, m in self._child_machines.items()},
@@ -153,6 +174,29 @@ class OrcaMachine:
             for leaf in self._state.leaves():
                 self._start_timeout_for_state(leaf)
 
+    async def load_or_start(self) -> None:
+        """
+        If a snapshot exists for self._run_id, resume from it.
+        Otherwise, start fresh.
+
+        Replaces the manual pattern of checking persistence, then calling
+        resume() or start() explicitly.
+        """
+        if self._persistence and self._run_id:
+            if asyncio.iscoroutinefunction(self._persistence.exists):
+                exists = await self._persistence.exists(self._run_id)  # type: ignore[misc]
+            else:
+                exists = self._persistence.exists(self._run_id)
+            if exists:
+                if asyncio.iscoroutinefunction(self._persistence.load):
+                    snap = await self._persistence.load(self._run_id)  # type: ignore[misc]
+                else:
+                    snap = self._persistence.load(self._run_id)
+                if snap:
+                    await self.resume(snap)
+                    return
+        await self.start()
+
     async def resume(self, snap: dict[str, Any]) -> None:
         """
         Boot the machine from a saved snapshot, skipping on_entry for the
@@ -166,6 +210,18 @@ class OrcaMachine:
         import copy
         if self._active:
             return
+
+        snap_version = snap.get("definition_version", "0.1.0")
+        if snap_version != self.definition.version:
+            import warnings
+            warnings.warn(
+                f"Snapshot version '{snap_version}' does not match "
+                f"machine definition version '{self.definition.version}' "
+                f"for machine '{self.definition.name}'. "
+                "The snapshot may be incompatible with the current definition.",
+                UserWarning,
+                stacklevel=2,
+            )
 
         self._state = StateValue(copy.deepcopy(snap["state"]))
         self.context = copy.deepcopy(snap["context"])
@@ -310,10 +366,9 @@ class OrcaMachine:
             TransitionResult indicating what happened
         """
         if not self._active:
-            return TransitionResult(
-                taken=False,
-                from_state=str(self._state),
-                error="Machine is not active"
+            raise MachineNotActiveError(
+                f"Machine '{self.definition.name}' is not active. "
+                "Call start() or resume() before sending events."
             )
 
         # Normalize to Event, preserving the original event name
@@ -431,11 +486,24 @@ class OrcaMachine:
             }
         ))
 
+        await self._auto_save()
+
         return TransitionResult(
             taken=True,
             from_state=str(old_state),
-            to_state=str(self._state)
+            to_state=str(self._state),
+            to_state_leaf=self._state.leaf(),
         )
+
+    async def _auto_save(self) -> None:
+        """Save a snapshot if persistence and run_id are configured."""
+        if self._persistence is None or self._run_id is None:
+            return
+        snap = self.snapshot()
+        if asyncio.iscoroutinefunction(self._persistence.save):
+            await self._persistence.save(self._run_id, snap)  # type: ignore[misc]
+        else:
+            self._persistence.save(self._run_id, snap)
 
     def _find_event_type(self, event_name: str) -> EventType:
         """Map event name to EventType enum."""
@@ -829,6 +897,8 @@ class OrcaMachine:
                 "to": str(self._state),
             }
         ))
+
+        await self._auto_save()
 
     def _is_event_ignored(self, event_name: str) -> bool:
         """Check if event is explicitly ignored in current state or parent states."""

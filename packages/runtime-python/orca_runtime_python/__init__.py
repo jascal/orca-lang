@@ -25,11 +25,11 @@ from .bus import (
     get_event_bus,
 )
 
-from .machine import OrcaMachine
+from .machine import OrcaMachine, MachineNotActiveError, TransitionResult
 
 from .parser import parse_orca_md, parse_orca_auto
 
-from .persistence import PersistenceAdapter, FilePersistence
+from .persistence import PersistenceAdapter, AsyncPersistenceAdapter, FilePersistence
 
 from .logging import LogSink, FileSink, ConsoleSink, MultiSink
 
@@ -55,11 +55,14 @@ __all__ = [
     "get_event_bus",
     # Machine
     "OrcaMachine",
+    "MachineNotActiveError",
+    "TransitionResult",
     # Parser
     "parse_orca_md",
     "parse_orca_auto",
     # Persistence
     "PersistenceAdapter",
+    "AsyncPersistenceAdapter",
     "FilePersistence",
     # Logging
     "LogSink",

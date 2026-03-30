@@ -650,9 +650,43 @@ def _map_op(op: str) -> str:
     }.get(op, "eq")
 
 
+def _validate_machine_def(defn: MachineDef) -> None:
+    """Post-parse structural validation. Raises ParseError on invalid definitions."""
+    if not defn.states:
+        raise ParseError(f"Machine '{defn.name}': no states defined.")
+    if not any(s.is_initial for s in defn.states):
+        raise ParseError(f"Machine '{defn.name}': no [initial] state.")
+    state_names = {s.name for s in defn.states}
+    # Include nested/parallel child state names
+    def _collect_names(states: list[StateDef]) -> None:
+        for s in states:
+            state_names.add(s.name)
+            if s.contains:
+                _collect_names(s.contains)
+            if s.parallel:
+                for region in s.parallel.regions:
+                    _collect_names(region.states)
+    _collect_names(defn.states)
+    for t in defn.transitions:
+        if t.source not in state_names:
+            raise ParseError(
+                f"Machine '{defn.name}': transition source '{t.source}' is not defined."
+            )
+        if t.target not in state_names:
+            raise ParseError(
+                f"Machine '{defn.name}': transition target '{t.target}' is not defined."
+            )
+        guard_ref = t.guard.lstrip("!") if t.guard else None
+        if guard_ref and guard_ref not in defn.guards:
+            raise ParseError(
+                f"Machine '{defn.name}': guard '{t.guard}' is used but not defined."
+            )
+
+
 def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
     """Parse a single machine from already-split elements."""
     machine_name = "unknown"
+    machine_version = "0.1.0"
     context: dict[str, Any] = {}
     events: list[str] = []
     transitions: list[Transition] = []
@@ -661,6 +695,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
     effects: list[EffectDef] = []
     state_entries: list[_MdStateEntry] = []
     current_state_entry: _MdStateEntry | None = None
+    in_machine_meta: bool = False
 
     i = 0
     while i < len(elements):
@@ -671,8 +706,12 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
             if el.level == 1 and el.text.startswith("machine "):
                 machine_name = el.text[8:].strip()
                 current_state_entry = None
+                in_machine_meta = True
                 i += 1
                 continue
+
+            # Section and state headings clear machine-meta mode
+            in_machine_meta = False
 
             # Section headings
             section_name = el.text.lower()
@@ -807,6 +846,11 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
             elif isinstance(el, _MdBulletList):
                 for item in el.items:
                     _parse_md_state_bullet(current_state_entry, item)
+        elif in_machine_meta and isinstance(el, _MdBulletList):
+            # Machine-level metadata bullets (e.g. "- version: 1.2.0")
+            for item in el.items:
+                if item.startswith("version:"):
+                    machine_version = item[len("version:"):].strip()
 
         i += 1
 
@@ -814,7 +858,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
     base_level = state_entries[0].level if state_entries else 2
     states, _ = _build_md_states_at_level(state_entries, 0, base_level)
 
-    return MachineDef(
+    defn = MachineDef(
         name=machine_name,
         context=context,
         events=events,
@@ -823,7 +867,10 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
         guards=guards,
         actions=actions,
         effects=effects,
+        version=machine_version,
     )
+    _validate_machine_def(defn)
+    return defn
 
 
 def parse_orca_md(source: str) -> MachineDef:

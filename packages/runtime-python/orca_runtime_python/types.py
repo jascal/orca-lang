@@ -99,6 +99,7 @@ class MachineDef:
     guards: dict[str, GuardExpression] = field(default_factory=dict)
     actions: list[ActionSignature] = field(default_factory=list)
     effects: list[EffectDef] = field(default_factory=list)
+    version: str = "0.1.0"
 
 
 class GuardExpression:

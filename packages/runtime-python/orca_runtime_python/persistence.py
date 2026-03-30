@@ -22,7 +22,7 @@ from typing import Any, Protocol, runtime_checkable
 @runtime_checkable
 class PersistenceAdapter(Protocol):
     """
-    Protocol for Orca machine state persistence.
+    Synchronous persistence adapter. Suitable for local file I/O.
 
     Implementations must support three operations keyed by run_id:
     save, load (returns None if not found), and exists.
@@ -37,6 +37,28 @@ class PersistenceAdapter(Protocol):
         ...
 
     def exists(self, run_id: str) -> bool:
+        """Return True if a snapshot exists for run_id."""
+        ...
+
+
+@runtime_checkable
+class AsyncPersistenceAdapter(Protocol):
+    """
+    Async persistence adapter for database and network backends.
+
+    Drop-in replacement for PersistenceAdapter when using async drivers
+    (asyncpg, aioredis, aiobotocore, etc.). OrcaMachine accepts either.
+    """
+
+    async def save(self, run_id: str, snapshot: dict[str, Any]) -> None:
+        """Persist snapshot under run_id. Overwrites any prior snapshot."""
+        ...
+
+    async def load(self, run_id: str) -> dict[str, Any] | None:
+        """Return the snapshot for run_id, or None if it doesn't exist."""
+        ...
+
+    async def exists(self, run_id: str) -> bool:
         """Return True if a snapshot exists for run_id."""
         ...
 
