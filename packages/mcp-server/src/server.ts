@@ -6,8 +6,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
+import { readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import {
   parseSkill,
   verifySkill,
@@ -17,8 +22,6 @@ import {
   generateAutoSkill,
   generateOrcaMultiDraftSkill,
   type SkillError,
-  ORCA_SYNTAX_REFERENCE,
-  MULTI_MACHINE_SYNTAX_ADDENDUM,
 } from '@orcalang/orca-lang/skills';
 import { ORCA_TOOLS } from '@orcalang/orca-lang/tools';
 
@@ -36,15 +39,36 @@ const TOOLS = ORCA_TOOLS as unknown as Tool[];
 
 // ── MCP server instructions (injected into every AI context on connect) ───────
 
-const MCP_INSTRUCTIONS = `This MCP server exposes Orca state machine tools. Orca is a markdown-based state machine language designed for LLM code generation.
+// Compact syntax reference — under 400 tokens
+const MCP_INSTRUCTIONS = `Orca MCP Server — state machine generation tools. Workflow: generate_machine → verify_machine → refine_machine (if errors) → compile_machine → generate_actions.
 
-Recommended workflow: generate_machine → verify_machine → refine_machine (if errors) → verify_machine → compile_machine → generate_actions.
+## Syntax Reference
+# machine Name           // required heading
+## state Name [initial] // one [initial] required; [final] for terminal states
+## state Name [final]
+## transitions         // table: | Source | Event | Guard | Target | Action |
+## actions            // table: | Name | Signature |
 
-Each step is a discrete tool call so progress is visible between calls. generate_machine returns a draft; always call verify_machine next to check it.
+Minimal example (toggle):
+\`\`\`
+# machine Toggle
+## state off [initial]
+## state on
+## transitions
+| off | toggle | | on | increment |
+| on  | toggle | | off | increment |
+## actions
+| Name | Signature |
+| increment | \`(ctx) -> Context\` |
+\`\`\`
 
-${ORCA_SYNTAX_REFERENCE}
-
-${MULTI_MACHINE_SYNTAX_ADDENDUM}`;
+## Key Rules
+- [initial] and [final] are the ONLY syntax for initial/final states
+- Guards: ctx.field comparisons (< > == != <= >=), null checks, boolean ops (and/or/not). NO method calls.
+- Effect actions: \`(ctx) -> Context + Effect<T>\`
+- Transitions reference actions by name only — no action bodies in Orca
+- Multi-machine: separate files with ---, use invoke: ChildMachine in states
+`;
 
 // ── Tool dispatch ─────────────────────────────────────────────────────────────
 
@@ -129,10 +153,103 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
 
 const server = new Server(
   { name: 'orca', version: '0.1.0' },
-  { capabilities: { tools: {} }, instructions: MCP_INSTRUCTIONS },
+  { capabilities: { tools: {}, resources: {} }, instructions: MCP_INSTRUCTIONS },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+
+// ── Resources ────────────────────────────────────────────────────────────────
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Examples are in packages/orca-lang/examples (sibling package to mcp-server)
+// From packages/mcp-server/dist: ../../../packages/orca-lang/examples
+const EXAMPLES_DIR = resolve(__dirname, '../../../packages/orca-lang/examples');
+
+// Grammar spec content (loaded lazily to avoid bundling large strings)
+let grammarSpecContent: string | null = null;
+function getGrammarSpec(): string {
+  if (!grammarSpecContent) {
+    try {
+      grammarSpecContent = readFileSync(resolve(__dirname, '../../../docs/orca-md-grammar-spec.md'), 'utf-8');
+    } catch {
+      grammarSpecContent = '# Orca Grammar Specification\n\nGrammar spec not found. See AGENTS.md for syntax reference.';
+    }
+  }
+  return grammarSpecContent;
+}
+
+// Example files to expose as resources
+const EXAMPLES: { name: string; file: string }[] = [
+  { name: 'simple-toggle', file: 'simple-toggle.orca.md' },
+  { name: 'payment-processor', file: 'payment-processor.orca.md' },
+];
+
+const ORCA_RESOURCES = [
+  {
+    uri: 'orca://grammar',
+    name: 'Orca Grammar Specification',
+    description: 'Full grammar reference for .orca.md files — headings, tables, transitions, guards, actions, effects, and multi-machine syntax.',
+    mimeType: 'text/markdown',
+  },
+  ...EXAMPLES.map(({ name }) => ({
+    uri: `orca://examples/${name}`,
+    name: `Example: ${name}`,
+    description: `Example Orca machine: ${name}.orca.md`,
+    mimeType: 'text/markdown',
+  })),
+];
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  resources: ORCA_RESOURCES,
+}));
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const uri = request.params.uri;
+
+  if (uri === 'orca://grammar') {
+    return {
+      contents: [{
+        uri,
+        mimeType: 'text/markdown',
+        text: getGrammarSpec(),
+      }],
+    };
+  }
+
+  const exampleMatch = uri.match(/^orca:\/\/examples\/([\w-]+)$/);
+  if (exampleMatch) {
+    const exampleName = exampleMatch[1];
+    const example = EXAMPLES.find(e => e.name === exampleName);
+    if (example) {
+      try {
+        const content = readFileSync(resolve(EXAMPLES_DIR, example.file), 'utf-8');
+        return {
+          contents: [{
+            uri,
+            mimeType: 'text/markdown',
+            text: content,
+          }],
+        };
+      } catch {
+        return {
+          contents: [{
+            uri,
+            mimeType: 'text/plain',
+            text: `Example "${exampleName}" not found.`,
+          }],
+        };
+      }
+    }
+  }
+
+  return {
+    contents: [{
+      uri,
+      mimeType: 'text/plain',
+      text: `Resource not found: ${uri}`,
+    }],
+  };
+});
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;

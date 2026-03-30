@@ -16,7 +16,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'parse_machine',
     description:
-      'Parse an Orca machine definition and return its structure as JSON (states, events, transitions, guards, actions, context). Supports single and multi-machine files. Source must use "# machine Name" heading, "## state Name [initial]" for states, and a "## transitions" section with a | Source | Event | Guard | Target | Action | table.',
+      'Parse .orca.md source → JSON (states, events, transitions, guards, actions, context). Syntax: # machine Name, ## state Name [initial|final], ## transitions table (| Source | Event | Guard | Target | Action |).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -28,7 +28,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'verify_machine',
     description:
-      'Verify an Orca machine definition for structural correctness, completeness, and determinism. Checks that exactly one [initial] state exists, all states are reachable, no deadlocks exist (every non-final state handles all events or has timeouts), and guards on competing transitions are mutually exclusive. Returns structured errors and warnings.',
+      'Verify machine structure: checks [initial] presence (exactly one), reachability, no deadlocks, guard determinism. Returns structured errors with codes and suggestions. Run before compile_machine.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -40,7 +40,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'compile_machine',
     description:
-      'Compile a verified Orca machine to XState v5 config (TypeScript) or Mermaid stateDiagram-v2. Run verify_machine first to catch errors before compiling.',
+      'Compile verified machine to XState v5 TypeScript or Mermaid stateDiagram-v2. Run verify_machine first. target: "xstate" (default) or "mermaid".',
     inputSchema: {
       type: 'object',
       properties: {
@@ -57,7 +57,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'generate_machine',
     description:
-      'Generate a draft Orca machine definition from a natural language specification. Automatically chooses between a single-machine or multi-machine design based on the spec: specs that mention a coordinator, orchestrator, or multiple independently-lifecycled sub-processes route to multi-machine; everything else produces a single machine. Returns raw .orca.md source and an is_multi flag. Always call verify_machine on the result next — then refine_machine if there are errors. Requires LLM configuration via environment variables (ANTHROPIC_API_KEY, etc.).',
+      'Generate draft .orca.md from natural language spec. Returns source + is_multi flag. Always verify_machine next, then refine_machine if errors. Requires LLM API key (ANTHROPIC_API_KEY, etc.).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -72,7 +72,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'generate_actions',
     description:
-      'Generate action scaffold code for an Orca machine in TypeScript, Python, or Go. Includes registration comments and optional test scaffolds. Requires a successfully parsed machine — pass verified .orca.md source.',
+      'Generate action scaffold code from verified machine. lang: typescript (default), python, or go. Pass verified .orca.md source. use_llm: true for implementations vs templates. generate_tests: true for test scaffolds.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -97,7 +97,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'generate_multi_machine',
     description:
-      'Generate a draft set of coordinated Orca machines from a natural language specification. Returns multiple machine definitions in one .orca.md file (separated by ---). Always call verify_machine on the result next — then refine_machine if there are errors. Requires LLM configuration via environment variables.',
+      'Generate coordinated multi-machine .orca.md from spec (machines separated by ---). Use invoke: ChildMachine in states. Always verify_machine next, then refine_machine if errors. Requires LLM API key.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -112,7 +112,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'refine_machine',
     description:
-      'Fix verification errors in an Orca machine using an LLM. Loops until the machine is valid or max_iterations is reached. If errors are not provided, verification runs automatically first. Use this after verify_machine returns errors.',
+      'Fix verify_machine errors using LLM. Loops until valid or max_iterations (default: 3). Pass errors array from verify_machine output, or omit to auto-verify first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -136,7 +136,7 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'server_status',
     description:
-      'Return the MCP server version and active configuration. API keys are never included in the response — only whether a key is configured. Use this to confirm the server is running and check which LLM provider and model are active.',
+      'Return MCP server version, active LLM provider/model, and configuration. API keys are never exposed — only whether a key is configured.',
     inputSchema: {
       type: 'object',
       properties: {},
