@@ -1,6 +1,6 @@
 {
   "name": "@orcalang/orca-runtime-ts",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "TypeScript async runtime for Orca state machines",
   "type": "module",
   "main": "./dist/index.js",

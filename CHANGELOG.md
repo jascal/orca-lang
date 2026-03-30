@@ -6,6 +6,15 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.17] — 2026-03-29
+
+### Fixed
+
+- `server.json`: keep MCP registry manifest version in sync with package versions — was frozen at `0.1.13`, causing `mcp-publisher` to reject every release after that with "cannot publish duplicate version"
+- `ci.yml`: add `Bump server.json version` step to the version bump job so `server.json` stays in sync automatically on every future release
+
+---
+
 ## [v0.1.16] — 2026-03-29
 
 ### Added
