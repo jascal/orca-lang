@@ -8,13 +8,18 @@
     "test": "pnpm -r run test",
     "test:lang": "pnpm --filter orca run test",
     "test:demo-ts": "pnpm --filter orca-demo-ts run test",
+    "run:demo-ts": "pnpm --filter orca-demo-ts run cli",
+    "run:demo-ts:ticket": "pnpm --filter orca-demo-ts run ticket-demo",
     "test:demo-python": ".venv/bin/python packages/demo-python/demo.py",
     "setup:python": "bash scripts/setup-python.sh",
     "test:demo-nanolab": ".venv/bin/python -m pytest packages/demo-nanolab/tests/ -v",
     "run:demo-nanolab": ".venv/bin/python -m nanolab --max-iters 100",
     "setup:go": "cd packages/runtime-go && go mod download && cd ../demo-go && go mod download",
     "build:demo-go": "cd packages/demo-go && go build -o trip ./cmd/trip",
+    "build:demo-go:loan": "cd packages/demo-go && go build -o loan ./cmd/loan",
     "test:demo-go": "cd packages/demo-go && ./trip",
+    "run:demo-go:loan": "cd packages/demo-go && ./loan",
+    "health-check": "cd packages/orca-lang && pnpm run health-check",
     "clean": "pnpm -r exec rm -rf dist"
   },
   "engines": {

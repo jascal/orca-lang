@@ -51,11 +51,16 @@ pnpm test:lang
 # Run demo-ts smoke test
 pnpm test:demo-ts
 
+# Run TypeScript demos
+pnpm run run:demo-ts           # Interactive text adventure game
+pnpm run run:demo-ts:ticket    # Support Ticket Escalation (Decision Table demo)
+
 # Run Python demo
 pnpm run test:demo-python
 
-# Run Go demo
-pnpm run test:demo-go
+# Run Go demos
+pnpm run test:demo-go          # Ride-hailing trip coordinator
+pnpm run run:demo-go:loan      # Loan Application Processor (Decision Table demo)
 
 # Run nanolab demo tests (machine parsing + pipeline logic, no torch required)
 pnpm run test:demo-nanolab
@@ -63,8 +68,8 @@ pnpm run test:demo-nanolab
 # Run nanolab demo pipeline (requires torch for actual training)
 pnpm run run:demo-nanolab
 
-# Interactive text adventure
-cd packages/demo-ts && pnpm run cli
+# Dogfood health check — runs all builds, tests, and demos sequentially
+pnpm health-check
 
 # CLI commands (from packages/orca-lang)
 cd packages/orca-lang
@@ -98,11 +103,15 @@ Standalone Go runtime. Zero external dependencies. Goroutine-based event bus, Or
 ### packages/demo-ts (orca-demo-ts)
 Playable text adventure game. Interactive CLI, 8-state machine, world map with 4 locations, inventory system, score tracking, LLM narrative generation path. Showcases `## effects` parsing, `MultiSink` audit logging, `FilePersistence` snapshot/checkpoint, and `OrcaMachine.resume()`. Depends on `@orcalang/orca-runtime-ts` via pnpm workspace.
 
+Also includes: **Support Ticket Escalation** demo (`pnpm run run:demo-ts:ticket`) — 8-state workflow with two decision tables (triaging + routing), demonstrating multiple DTs per workflow.
+
 ### packages/demo-python (orca-demo-python)
-Agent framework demo with 4 scenarios: order processing (8-state workflow), multi-agent task orchestration, event bus request/response, and parsed Orca machine.
+Agent framework demo with 6 scenarios: order processing (8-state workflow), multi-agent task orchestration, event bus request/response, parsed Orca machine, Decision Table evaluator, and Order Fulfillment with DT routing.
 
 ### packages/demo-go (orca-demo-go)
 Ride-hailing trip coordinator demo. 5-machine `trip.orca.md` (TripCoordinator, DriverDispatch, PaymentAuth, TripExecution, FareSettlement). Runs FareSettlement end-to-end showcasing `## effects` display, `MultiSink` JSONL audit logging, `FilePersistence` checkpoint, and `--resume` flag via `OrcaMachine.Resume()`.
+
+Also includes: **Loan Application Processor** demo (`pnpm run run:demo-go:loan`) — 6-state workflow with two decision tables (risk assessment + disbursement), demonstrating `int_range` numeric conditions, enum conditions, and bool conditions.
 
 ### packages/demo-nanolab (orca-demo-nanolab)
 nanoGPT training orchestrator. 5-machine architecture in a single `.orca.md` file (separated by `---`): TrainingLab (coordinator), DataPipeline, HyperSearch (parallel trial regions), TrainingRun, Evaluator. Recursive multi-machine driver with context merging and parallel dispatch via `asyncio.gather`. Vendors nanoGPT's `train.py`/`model.py`/`sample.py`. Features: pluggable persistence (`FilePersistence`, `--persist`), structured JSONL audit logging (`FileSink`, `--log`), rich terminal display, LLM workflow refinement (`--refine`). Requires `torch` for actual training; 47 tests run without it. Design doc: `docs/demo-nanolab.md`.
@@ -135,6 +144,13 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 - **Test counts**: 135 orca-lang tests, 63 runtime-ts tests, 69 runtime-python tests, 16 runtime-go tests, 47 demo-nanolab tests
 
 **Phase 5 (nanolab) Complete**: demo-nanolab — all 8 phases shipped. 5-machine orchestrator (TrainingLab, DataPipeline, HyperSearch with parallel regions, TrainingRun, Evaluator). Framework features driven by this demo: `## effects` section in Python parser (`EffectDef`), pluggable `PersistenceAdapter` + `FilePersistence` + `OrcaMachine.resume()`, `LogSink` protocol + `FileSink`/`ConsoleSink`/`MultiSink`. Rich terminal display (Phase 7). LLM workflow refinement via Claude API (Phase 8 — `nanolab.refine`, `--refine` flag). 47 tests (no torch required). Design doc: `docs/demo-nanolab.md`.
+
+**Decision Table Demos Complete**: Three DT demo ideas implemented across runtimes:
+- **demo-python Order Fulfillment** (`pnpm run test:demo-python`): 6-state workflow + DT at `routed` state for shipping/warehouse/fraud routing — demonstrates SM + DT for conditional routing
+- **demo-ts Support Ticket Escalation** (`pnpm run run:demo-ts:ticket`): 8-state workflow + 2 DTs (triaging + routing) — demonstrates multiple DTs per workflow, first-match policy
+- **demo-go Loan Application Processor** (`pnpm run run:demo-go:loan`): 6-state workflow + 2 DTs (risk assessment + disbursement) — demonstrates `int_range` numeric conditions, enum conditions, bool conditions
+
+**Dogfood Health Check**: Orca dogfoods itself via `pnpm health-check` — runs all builds, tests, and demos sequentially (~22s). State machine definition at `packages/orca-lang/examples/health-check.orca.md`, TypeScript runner at `packages/orca-lang/src/health-check.ts`.
 
 **Phase 6 — Agent Adoption & Distribution** ⏳ Not started: Make Orca installable and usable by external agent systems (OpenClaw, AutoGen, Claude tool use, etc.) without cloning the repo or writing files to disk. Three tracks:
 - **Track A — Distribution**: publish npm/PyPI/Go packages, fix Go module path, GitHub Actions release workflow, CHANGELOG

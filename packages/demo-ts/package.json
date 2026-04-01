@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "cli": "tsx src/cli.ts",
+    "ticket-demo": "tsx src/ticket-demo.ts",
     "test": "tsx src/test-game.ts",
     "debug": "tsx src/debug-compile.ts"
   },

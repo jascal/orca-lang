@@ -7,6 +7,8 @@ import { checkProperties } from './verifier/properties.js';
 import { compileToXState } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { MachineDef, StateDef, GuardExpression, Type } from './parser/ast.js';
+import { verifyDecisionTable, verifyDecisionTables } from './verifier/dt-verifier.js';
+import { compileDecisionTableToTypeScript, compileDecisionTableToJSON } from './compiler/dt-compiler.js';
 import { loadConfig, resolveConfigOverrides } from './config/index.js';
 import { createProvider } from './llm/index.js';
 import type { LLMProvider } from './llm/index.js';
@@ -45,7 +47,12 @@ export interface SkillError {
   location?: {
     state?: string;
     event?: string;
-    transition?: string;
+    transition?: string | { source?: string; target?: string; event?: string }; // string for machine errors, object for DT errors
+    // Decision table specific
+    rule?: number;
+    condition?: string;
+    action?: string;
+    decisionTable?: string;
   };
   suggestion?: string;
 }
@@ -1677,3 +1684,269 @@ function extractMachineNameFromSource(orca: string): string {
   const match = orca.match(/^(?:#\s+)?machine\s+(\w+)/m);
   return match ? match[1] : 'Unknown';
 }
+
+// ============================================================
+// Decision Table Skills
+// ============================================================
+
+export interface VerifyDTSkillResult {
+  status: 'valid' | 'invalid';
+  decisionTable: string;
+  conditions: number;
+  actions: number;
+  rules: number;
+  errors: SkillError[];
+}
+
+export interface CompileDTSkillResult {
+  status: 'success' | 'error';
+  target: 'typescript' | 'json';
+  output: string;
+  warnings: SkillError[];
+}
+
+/**
+ * Parse a decision table from source.
+ */
+export function parseDTSkill(input: SkillInput): { status: 'success' | 'error'; decisionTables?: object[]; error?: string } {
+  try {
+    const source = resolveSource(input);
+    const { file } = parseMarkdown(source);
+
+    if (file.decisionTables.length === 0) {
+      return { status: 'error', error: 'No decision table found in source' };
+    }
+
+    // Return all decision tables as plain objects
+    const tables = file.decisionTables.map(dt => ({
+      name: dt.name,
+      description: dt.description,
+      conditions: dt.conditions.map(c => ({
+        name: c.name,
+        type: c.type,
+        values: c.values,
+        range: c.range,
+      })),
+      actions: dt.actions.map(a => ({
+        name: a.name,
+        type: a.type,
+        description: a.description,
+        values: a.values,
+      })),
+      rules: dt.rules.map(r => ({
+        number: r.number,
+        conditions: Object.fromEntries(r.conditions),
+        actions: Object.fromEntries(r.actions),
+      })),
+      policy: dt.policy,
+    }));
+
+    return { status: 'success', decisionTables: tables };
+  } catch (err) {
+    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * Verify a decision table.
+ */
+export function verifyDTSkill(input: SkillInput): VerifyDTSkillResult {
+  try {
+    const source = resolveSource(input);
+    const { file } = parseMarkdown(source);
+
+    if (file.decisionTables.length === 0) {
+      return {
+        status: 'invalid',
+        decisionTable: '',
+        conditions: 0,
+        actions: 0,
+        rules: 0,
+        errors: [{ code: 'DT_NOT_FOUND', message: 'No decision table found in source', severity: 'error' }],
+      };
+    }
+
+    // Verify all decision tables
+    const verification = verifyDecisionTables(file.decisionTables);
+
+    // Return result for the first decision table
+    const dt = file.decisionTables[0];
+    const errors: SkillError[] = [];
+    for (const e of verification.errors) {
+      const loc = e.location;
+      errors.push({
+        code: e.code,
+        message: e.message,
+        severity: e.severity as 'error' | 'warning',
+        location: loc ? {
+          state: loc.state,
+          event: loc.event,
+          rule: loc.rule,
+          condition: loc.condition,
+          action: loc.action,
+          decisionTable: loc.decisionTable,
+        } : undefined,
+        suggestion: e.suggestion,
+      });
+    }
+
+    return {
+      status: verification.valid ? 'valid' : 'invalid',
+      decisionTable: dt.name,
+      conditions: dt.conditions.length,
+      actions: dt.actions.length,
+      rules: dt.rules.length,
+      errors,
+    };
+  } catch (err) {
+    return {
+      status: 'invalid',
+      decisionTable: '',
+      conditions: 0,
+      actions: 0,
+      rules: 0,
+      errors: [{ code: 'PARSE_ERROR', message: err instanceof Error ? err.message : String(err), severity: 'error' }],
+    };
+  }
+}
+
+/**
+ * Compile a decision table to TypeScript or JSON.
+ */
+export function compileDTSkill(input: SkillInput, target: 'typescript' | 'json' = 'typescript'): CompileDTSkillResult {
+  try {
+    const source = resolveSource(input);
+    const { file } = parseMarkdown(source);
+
+    if (file.decisionTables.length === 0) {
+      return {
+        status: 'error',
+        target,
+        output: '',
+        warnings: [{ code: 'DT_NOT_FOUND', message: 'No decision table found in source', severity: 'error' }],
+      };
+    }
+
+    const dt = file.decisionTables[0];
+    const output = target === 'json'
+      ? compileDecisionTableToJSON(dt)
+      : compileDecisionTableToTypeScript(dt);
+
+    return { status: 'success', target, output, warnings: [] };
+  } catch (err) {
+    return {
+      status: 'error',
+      target,
+      output: '',
+      warnings: [{ code: 'COMPILE_ERROR', message: err instanceof Error ? err.message : String(err), severity: 'error' }],
+    };
+  }
+}
+
+// Decision table syntax reference for LLM generation
+const DT_SYNTAX_REFERENCE = `
+# decision_table Name
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| field_name | enum | value1, value2 |
+| is_active | bool | |
+| count | int_range | 1..100 |
+
+## actions
+
+| Name | Type | Description |
+|------|------|-------------|
+| result | enum | Result description |
+| flag | bool | Whether something |
+
+## rules
+
+| condition1 | condition2 | → action1 | → action2 |
+|------------|-----------|----------|-----------|
+| value1 | - | result1 | true |
+| value2 | !value3 | result2 | false |
+
+Notes:
+- "-" in a condition cell means "any" (wildcard)
+- "!value" negates a value
+- "a,b" matches any of the values (OR semantics)
+- Rules are evaluated top-to-bottom; first match wins
+`;
+
+/**
+ * Generate a decision table from natural language spec.
+ */
+export async function generateDTSkill(spec: string, configPath?: string): Promise<{
+  status: 'success' | 'error' | 'requires_refinement';
+  decisionTable?: string;
+  orca?: string;
+  verification?: VerifyDTSkillResult;
+  error?: string;
+}> {
+  const config = loadConfig(configPath);
+  const provider = createProvider(config.provider, {
+    api_key: config.api_key,
+    base_url: config.base_url,
+    model: config.model,
+    max_tokens: config.max_tokens,
+    temperature: config.temperature,
+  });
+
+  if (!provider) {
+    return { status: 'error', error: 'No LLM provider configured' };
+  }
+
+  const prompt = `Generate a decision table in .orca.md format based on the following specification.
+
+${DT_SYNTAX_REFERENCE}
+
+Specification:
+${spec}
+
+Respond with the decision table only, no explanation.`;
+
+  try {
+    const response = await provider.complete({
+      messages: [{ role: 'user', content: prompt }],
+      model: '',
+      max_tokens: config.max_tokens || 2048,
+      temperature: 0.7,
+    });
+
+    const orca = stripCodeFence(response.content);
+
+    // Verify the generated decision table
+    const { file } = parseMarkdown(orca);
+    if (file.decisionTables.length === 0) {
+      return { status: 'error', error: 'Generated content does not contain a valid decision table', orca };
+    }
+
+    const verification = verifyDecisionTables(file.decisionTables);
+
+    return {
+      status: verification.valid ? 'success' : 'requires_refinement',
+      decisionTable: file.decisionTables[0].name,
+      orca,
+      verification: verification.valid ? undefined : {
+        status: 'invalid',
+        decisionTable: file.decisionTables[0].name,
+        conditions: file.decisionTables[0].conditions.length,
+        actions: file.decisionTables[0].actions.length,
+        rules: file.decisionTables[0].rules.length,
+        errors: verification.errors.map(e => ({
+          code: e.code,
+          message: e.message,
+          severity: e.severity,
+          location: e.location,
+          suggestion: e.suggestion,
+        })),
+      },
+    };
+  } catch (err) {
+    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+

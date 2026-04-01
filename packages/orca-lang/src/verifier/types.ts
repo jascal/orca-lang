@@ -10,6 +10,10 @@ export interface VerificationError {
     state?: string;
     event?: string;
     transition?: Transition;
+    rule?: number;         // NEW - rule number (1-based)
+    condition?: string;    // NEW - condition name
+    action?: string;       // NEW - action name
+    decisionTable?: string; // NEW - decision table name
   };
   suggestion?: string;
 }
