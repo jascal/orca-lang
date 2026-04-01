@@ -52,6 +52,34 @@ describe('Decision Table Compiler', () => {
       expect(output).toContain('export function evaluatePaymentRouting');
     });
 
+    it('enum condition/action with no declared values generates string type', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| status | enum | |
+
+## actions
+
+| Name | Type |
+|------|------|
+| result | enum | |
+
+## rules
+
+| status | → result |
+|--------|----------|
+| active | ok |
+`);
+      const dt = result.file.decisionTables[0];
+      const output = compileDecisionTableToTypeScript(dt);
+      // enum with no values should fall back to string, not produce an empty union
+      expect(output).toContain('status: string;');
+      expect(output).toContain('result: string;');
+    });
+
     it('generates correct output for known inputs', () => {
       const result = parseMarkdown(`# decision_table Test
 

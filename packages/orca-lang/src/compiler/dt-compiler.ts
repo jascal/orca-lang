@@ -44,8 +44,8 @@ function generateTypeScriptType(type: string, values: string[]): string {
   if (type === 'bool') {
     return 'boolean';
   }
-  if (type === 'enum' && values.length > 0) {
-    return values.map(v => `'${v}'`).join(' | ');
+  if (type === 'enum') {
+    return values.length > 0 ? values.map(v => `'${v}'`).join(' | ') : 'string';
   }
   if (type === 'int_range') {
     return 'number';

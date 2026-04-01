@@ -194,6 +194,33 @@ Optional prose description of what this table decides.
       expect(dt.rules[0].conditions.get('tier')).toEqual({ kind: 'negated', value: 'vip' });
     });
 
+    it('bare "!" with no value is treated as exact match, not negation', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+
+## actions
+
+| Name | Type |
+|------|------|
+| result | enum | ok |
+
+## rules
+
+| tier | → result |
+|------|----------|
+| ! | ok |
+`);
+
+      const dt = result.file.decisionTables[0];
+      // Bare '!' has no negated value — should fall through to exact match
+      expect(dt.rules[0].conditions.get('tier')).toEqual({ kind: 'exact', value: '!' });
+    });
+
     it('parses set cells as { kind: "set" }', () => {
       const result = parseMarkdown(`# decision_table Test
 

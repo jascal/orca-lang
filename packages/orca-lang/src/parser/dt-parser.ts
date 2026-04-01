@@ -28,9 +28,12 @@ function parseCellValue(text: string | undefined): CellValue {
 
   const trimmed = text.trim();
 
-  // Negated: !value
+  // Negated: !value (bare '!' with no value falls through to exact match)
   if (trimmed.startsWith('!')) {
-    return { kind: 'negated', value: trimmed.slice(1) };
+    const negatedValue = trimmed.slice(1);
+    if (negatedValue) {
+      return { kind: 'negated', value: negatedValue };
+    }
   }
 
   // Set: a,b,c

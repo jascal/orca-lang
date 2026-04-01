@@ -236,6 +236,35 @@ describe('Decision Table Verifier', () => {
   });
 
   describe('redundancy', () => {
+    it('non-overlapping rules with same actions are not flagged as redundant', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, medium, high |
+
+## actions
+
+| Name | Type |
+|------|------|
+| discount | enum | low, high |
+
+## rules
+
+| tier | → discount |
+|------|-----------|
+| low | low |
+| medium | low |
+| high | high |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      const redundantErrors = verification.errors.filter(e => e.code === 'DT_REDUNDANT');
+      expect(redundantErrors).toHaveLength(0);
+    });
+
     it('redundant rule detected with DT_REDUNDANT', () => {
       const result = parseMarkdown(`# decision_table Test
 
@@ -474,6 +503,36 @@ describe('Decision Table Verifier', () => {
   });
 
   describe('large tables', () => {
+    it('int_range condition skips completeness with a clear message (not DT_INCOMPLETE)', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 300..850 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| tier | enum | low, high |
+
+## rules
+
+| score | → tier |
+|-------|--------|
+| 300..649 | low |
+| 650..850 | high |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      expect(verification.errors.some(e => e.code === 'DT_INCOMPLETE')).toBe(false);
+      const skipped = verification.errors.find(e => e.code === 'DT_COMPLETENESS_SKIPPED');
+      expect(skipped).toBeDefined();
+      expect(skipped!.message).toContain('int_range');
+    });
+
     it('large table (> 4096 combinations) gets DT_COMPLETENESS_SKIPPED warning', () => {
       // Create a table with many conditions to exceed 4096 combinations
       // 8 conditions with 4 values each = 4^8 = 65536 > 4096

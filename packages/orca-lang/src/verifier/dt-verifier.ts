@@ -369,12 +369,23 @@ function checkCompleteness(dt: DecisionTableDef): VerificationError[] {
 
   if (dt.conditions.length === 0) return errors; // Already reported in structural
 
-  // Calculate total combinations
+  // int_range conditions cannot be exhaustively enumerated — skip completeness check
+  if (dt.conditions.some(c => c.type === 'int_range')) {
+    errors.push({
+      code: 'DT_COMPLETENESS_SKIPPED',
+      message: 'Completeness check skipped: int_range conditions cannot be exhaustively enumerated',
+      severity: 'warning',
+      location: { decisionTable: dt.name },
+      suggestion: 'Manually verify that all numeric ranges are covered without gaps',
+    });
+    return errors;
+  }
+
+  // Calculate total combinations for enum/bool conditions
   let totalCombinations = 1;
   for (const cond of dt.conditions) {
     const values = getConditionValues(cond);
     if (values.length === 0) {
-      // Wildcard-only condition - no limit
       totalCombinations = Infinity;
       break;
     }
@@ -477,29 +488,26 @@ function checkRedundancy(dt: DecisionTableDef): VerificationError[] {
     const ruleNum = rule.number ?? ruleIdx + 1;
     const actionNames = dt.actions.map(a => a.name);
 
-    // Check if all inputs matched by this rule are also matched by an earlier rule with same actions
-    let isRedundant = true;
+    // A rule is redundant if at least one earlier rule overlaps it AND all overlapping
+    // earlier rules produce the same actions (meaning first-match would always hit them first
+    // with an identical result, so this rule can never change the outcome).
+    let hasOverlappingPredecessor = false;
+    let allOverlappingHaveSameActions = true;
 
     for (let prevIdx = 0; prevIdx < ruleIdx; prevIdx++) {
       const prevRule = dt.rules[prevIdx];
 
-      // Check if prevRule overlaps with this rule
       if (!rulesOverlap(prevRule, rule, dt.conditions)) continue;
 
-      // prevRule overlaps - check if it has same actions
+      hasOverlappingPredecessor = true;
+
       if (!actionsMatch(prevRule, rule, actionNames)) {
-        isRedundant = false;
+        allOverlappingHaveSameActions = false;
         break;
       }
-
-      // prevRule has same actions but may not cover all cases this rule covers
-      // For a rule to be redundant, prevRule must cover a superset of its conditions
-      // Actually, in first-match: if prevRule overlaps AND has same actions, then this rule is redundant
-      // because any input matching this rule will either match prevRule first (same actions = ok)
-      // or match this rule first (but prevRule comes first, so prevRule wins)
     }
 
-    if (isRedundant) {
+    if (hasOverlappingPredecessor && allOverlappingHaveSameActions) {
       errors.push({
         code: 'DT_REDUNDANT',
         message: `Rule ${ruleNum} is redundant — earlier rules cover all its cases with the same actions`,

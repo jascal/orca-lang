@@ -245,5 +245,5 @@ export function evaluateTicketRouting(
  */
 function matches(ruleValue: string, inputValue: string): boolean {
   if (ruleValue === '-') return true;
-  return ruleValue.toLowerCase() === inputValue.toLowerCase();
+  return ruleValue === inputValue;
 }
