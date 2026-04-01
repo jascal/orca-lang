@@ -23,8 +23,8 @@ type LoanScenario struct {
 
 func main() {
 	fmt.Println("╔════════════════════════════════════════════════════════════╗")
-	fmt.Println("║       Loan Application Processor - Go Runtime Demo         ║")
-	fmt.Println("║  Decision Tables: Risk Assessment + Disbursement            ║")
+	fmt.Println("║        Loan Application Processor - Go Runtime Demo        ║")
+	fmt.Println("║  Decision Tables: Risk Assessment + Disbursement           ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 

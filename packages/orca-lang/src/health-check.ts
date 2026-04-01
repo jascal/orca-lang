@@ -210,7 +210,7 @@ async function runHealthCheck(): Promise<HealthReport> {
 
 function printReport(report: HealthReport) {
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║                    HEALTH CHECK REPORT                      ║');
+  console.log('║                    HEALTH CHECK REPORT                     ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
   for (const step of report.steps) {
@@ -242,7 +242,7 @@ function printReport(report: HealthReport) {
 
 async function main() {
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║           ORCA HEALTH CHECK - SELF-HOSTED RUNNER            ║');
+  console.log('║           ORCA HEALTH CHECK - SELF-HOSTED RUNNER           ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
   const report = await runHealthCheck();
