@@ -143,4 +143,57 @@ export const ORCA_TOOLS: ToolDef[] = [
       required: [],
     },
   },
+  {
+    name: 'parse_decision_table',
+    description:
+      'Parse decision table from .orca.md source → JSON (conditions, actions, rules). Syntax: # decision_table Name, ## conditions table, ## actions table, ## rules table. Can be standalone or combined with machines in the same file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Raw .orca.md content containing a # decision_table heading.' },
+      },
+      required: ['source'],
+    },
+  },
+  {
+    name: 'verify_decision_table',
+    description:
+      'Verify decision table: checks completeness (all condition combinations covered), consistency (no contradictory rules), redundancy. Returns structured errors with codes and suggestions.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Raw .orca.md content containing a # decision_table heading.' },
+      },
+      required: ['source'],
+    },
+  },
+  {
+    name: 'compile_decision_table',
+    description:
+      'Compile verified decision table to TypeScript evaluator function or portable JSON. Run verify_decision_table first. target: "typescript" (default) or "json".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: 'Raw .orca.md content containing a # decision_table heading.' },
+        target: {
+          type: 'string',
+          enum: ['typescript', 'json'],
+          description: 'Compilation target (default: typescript)',
+        },
+      },
+      required: ['source'],
+    },
+  },
+  {
+    name: 'generate_decision_table',
+    description:
+      'Generate a decision table in .orca.md format from a natural language spec. Always verify_decision_table next. Requires LLM API key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        spec: { type: 'string', description: 'Natural language description of the decision logic' },
+      },
+      required: ['spec'],
+    },
+  },
 ];

@@ -1,8 +1,0 @@
-{"ts":"2026-03-28T14:01:59Z","run_id":"trip-demo","machine":"FareSettlement","event":"FARE_CALCULATED","from":"calculating","to":"charging_rider","context_delta":{}}
-{"ts":"2026-03-28T14:01:59Z","run_id":"trip-demo","machine":"FareSettlement","event":"RIDER_CHARGED","from":"charging_rider","to":"paying_driver","context_delta":{}}
-{"ts":"2026-03-28T14:01:59Z","run_id":"trip-demo","machine":"FareSettlement","event":"DRIVER_PAID","from":"paying_driver","to":"issuing_receipt","context_delta":{}}
-{"ts":"2026-03-28T14:01:59Z","run_id":"trip-demo","machine":"FareSettlement","event":"RECEIPTS_SENT","from":"issuing_receipt","to":"settled","context_delta":{}}
-{"ts":"2026-03-28T15:20:48Z","run_id":"trip-demo","machine":"FareSettlement","event":"FARE_CALCULATED","from":"calculating","to":"charging_rider","context_delta":{}}
-{"ts":"2026-03-28T15:20:48Z","run_id":"trip-demo","machine":"FareSettlement","event":"RIDER_CHARGED","from":"charging_rider","to":"paying_driver","context_delta":{}}
-{"ts":"2026-03-28T15:20:48Z","run_id":"trip-demo","machine":"FareSettlement","event":"DRIVER_PAID","from":"paying_driver","to":"issuing_receipt","context_delta":{}}
-{"ts":"2026-03-28T15:20:48Z","run_id":"trip-demo","machine":"FareSettlement","event":"RECEIPTS_SENT","from":"issuing_receipt","to":"settled","context_delta":{}}

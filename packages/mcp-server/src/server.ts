@@ -21,6 +21,10 @@ import {
   refineSkill,
   generateAutoSkill,
   generateOrcaMultiDraftSkill,
+  parseDTSkill,
+  verifyDTSkill,
+  compileDTSkill,
+  generateDTSkill,
   type SkillError,
 } from '@orcalang/orca-lang/skills';
 import { ORCA_TOOLS } from '@orcalang/orca-lang/tools';
@@ -40,16 +44,24 @@ const TOOLS = ORCA_TOOLS as unknown as Tool[];
 // ── MCP server instructions (injected into every AI context on connect) ───────
 
 // Compact syntax reference — under 400 tokens
-const MCP_INSTRUCTIONS = `Orca MCP Server — state machine generation tools. Workflow: generate_machine → verify_machine → refine_machine (if errors) → compile_machine → generate_actions.
+const MCP_INSTRUCTIONS = `Orca MCP Server — state machine and decision table generation tools.
+
+## State Machine Workflow
+generate_machine → verify_machine → refine_machine (if errors) → compile_machine → generate_actions.
+
+## Decision Table Workflow
+generate_decision_table → verify_decision_table → compile_decision_table.
 
 ## Syntax Reference
+
+### Machines
 # machine Name           // required heading
 ## state Name [initial] // one [initial] required; [final] for terminal states
 ## state Name [final]
 ## transitions         // table: | Source | Event | Guard | Target | Action |
 ## actions            // table: | Name | Signature |
 
-Minimal example (toggle):
+Minimal machine (toggle):
 \`\`\`
 # machine Toggle
 ## state off [initial]
@@ -58,8 +70,30 @@ Minimal example (toggle):
 | off | toggle | | on | increment |
 | on  | toggle | | off | increment |
 ## actions
-| Name | Signature |
 | increment | \`(ctx) -> Context\` |
+\`\`\`
+
+### Decision Tables
+# decision_table Name
+## conditions         // table: | Name | Type | Values |
+## actions           // table: | Name | Type | Description |
+## rules             // table: | cond1 | cond2 | → action1 | → action2 |
+
+Minimal decision table:
+\`\`\`
+# decision_table ShippingCost
+## conditions
+| Name | Type | Values |
+|------|------|--------|
+| weight | int_range | 1..50 |
+| zone | enum | domestic, international |
+## actions
+| Name | Type |
+| cost | enum | standard, express |
+## rules
+| weight | zone | → cost |
+| 1..20 | domestic | standard |
+| 1..20 | international | express |
 \`\`\`
 
 ## Key Rules
@@ -68,6 +102,7 @@ Minimal example (toggle):
 - Effect actions: \`(ctx) -> Context + Effect<T>\`
 - Transitions reference actions by name only — no action bodies in Orca
 - Multi-machine: separate files with ---, use invoke: ChildMachine in states
+- Decision table rules: "-" means "any", "!value" negates, "a,b" means OR. First match wins.
 `;
 
 // ── Tool dispatch ─────────────────────────────────────────────────────────────
@@ -142,6 +177,27 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
         temperature: process.env.ORCA_TEMPERATURE ? parseFloat(process.env.ORCA_TEMPERATURE) : 0.7,
         api_key_configured: apiKeyConfigured,
       };
+    }
+
+    case 'parse_decision_table': {
+      const source = args.source as string;
+      return parseDTSkill({ source });
+    }
+
+    case 'verify_decision_table': {
+      const source = args.source as string;
+      return verifyDTSkill({ source });
+    }
+
+    case 'compile_decision_table': {
+      const source = args.source as string;
+      const target = (args.target as 'typescript' | 'json') ?? 'typescript';
+      return compileDTSkill({ source }, target);
+    }
+
+    case 'generate_decision_table': {
+      const spec = args.spec as string;
+      return generateDTSkill(spec);
     }
 
     default:

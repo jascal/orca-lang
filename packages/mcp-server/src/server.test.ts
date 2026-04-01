@@ -153,7 +153,7 @@ describe('Orca MCP Server', () => {
       expect(instructions).toContain('## transitions');
       expect(instructions).toContain('## actions');
       expect(instructions).toContain('| Source | Event | Guard | Target | Action |');
-      expect(instructions).toContain('Minimal example');
+      expect(instructions).toContain('Minimal machine');
       expect(instructions).toContain('generate_machine');
       expect(instructions).toContain('verify_machine');
       expect(instructions).toContain('compile_machine');
@@ -443,7 +443,7 @@ describe('Orca MCP Server', () => {
       });
 
       const result = response.result as { tools: Array<{ name: string; description: string }> };
-      expect(result.tools).toHaveLength(8);
+      expect(result.tools).toHaveLength(12);
 
       const tools = result.tools.reduce<Record<string, string>>(
         (acc, t) => ({ ...acc, [t.name]: t.description }),

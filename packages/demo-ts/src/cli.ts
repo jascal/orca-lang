@@ -20,7 +20,7 @@ function getStateName(value: string | object): string {
 
 async function main() {
   console.log('╔════════════════════════════════════════╗');
-  console.log('║     RETRO ADVENTURE - ORCA DEMO       ║');
+  console.log('║       RETRO ADVENTURE - ORCA DEMO      ║');
   console.log('╚════════════════════════════════════════╝\n');
 
   // Load and parse the game.orca file

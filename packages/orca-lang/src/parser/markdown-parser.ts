@@ -10,6 +10,8 @@ import {
   ReachabilityProperty, PassesThroughProperty, RespondsProperty,
   InvariantProperty, InvokeDef,
 } from './ast.js';
+import { DecisionTableDef } from './dt-ast.js';
+import { parseDecisionTable } from './dt-parser.js';
 
 // ============================================================
 // Phase 1: Structural Markdown Parsing
@@ -790,7 +792,7 @@ function parseMachineFromElements(elements: MdElement[]): MachineDef {
   return machine;
 }
 
-function parseMarkdownSemantic(elements: MdElement[]): MachineDef[] {
+function parseMarkdownSemantic(elements: MdElement[]): { machines: MachineDef[]; decisionTables: DecisionTableDef[] } {
   // Split elements by --- separators for multi-machine files
   const chunks: MdElement[][] = [];
   let currentChunk: MdElement[] = [];
@@ -809,8 +811,33 @@ function parseMarkdownSemantic(elements: MdElement[]): MachineDef[] {
     chunks.push(currentChunk);
   }
 
-  // Parse each chunk as a separate machine
-  return chunks.map(chunk => parseMachineFromElements(chunk));
+  // Parse each chunk based on its H1 heading type
+  const machines: MachineDef[] = [];
+  const decisionTables: DecisionTableDef[] = [];
+
+  for (const chunk of chunks) {
+    // Find ALL H1 headings in the chunk to determine what it contains
+    const headings = chunk.filter(el => el.kind === 'heading' && el.level === 1) as MdHeading[];
+
+    // Check if chunk contains a decision_table (must be first H1 to be recognized as DT chunk)
+    const firstHeading = headings[0];
+    if (firstHeading?.text.startsWith('decision_table ')) {
+      const { decisionTable } = parseDecisionTable(chunk);
+      decisionTables.push(decisionTable);
+    } else if (firstHeading?.text.startsWith('machine ')) {
+      // First heading is machine - parse entire chunk as machine
+      machines.push(parseMachineFromElements(chunk));
+    } else {
+      // First heading is not machine or decision_table - scan for machine heading
+      const machineHeading = headings.find(h => h.text.startsWith('machine '));
+      if (machineHeading) {
+        machines.push(parseMachineFromElements(chunk));
+      }
+      // Skip chunks without a recognized machine or decision_table heading
+    }
+  }
+
+  return { machines, decisionTables };
 }
 
 function parseEffectsTable(table: MdTable): EffectDef[] {
@@ -834,8 +861,8 @@ function parsePropertiesList(list: MdBulletList): Property[] {
 
 export function parseMarkdown(source: string): ParseResult {
   const elements = parseMarkdownStructure(source);
-  const machines = parseMarkdownSemantic(elements);
-  return { file: { machines }, tokens: [] };
+  const { machines, decisionTables } = parseMarkdownSemantic(elements);
+  return { file: { machines, decisionTables }, tokens: [] };
 }
 
 /**

@@ -7,25 +7,19 @@ Demonstrates combining:
 """
 
 import asyncio
-import re
 from pathlib import Path
 from bus import get_event_bus, EventType, DomainEvent
 from workflows.order import create_order_processor, process_order
 from workflows.agent import create_agent_supervisor, run_agent_demo
-from orca import OrcaMachine, parse_orca, Event as OrcaEvent
+from workflows.fulfillment import run_order_fulfillment_demo
+from workflows.dt_evaluator import evaluate_order_routing, RoutingDecision
+from orca import OrcaMachine, parse_orca_multi, Event as OrcaEvent
 
 
-def _load_orca_from_markdown(machine_name: str) -> str:
-    """Extract an Orca machine definition from workflows.orca.md."""
-    workflows_file = Path(__file__).parent / "workflows.orca.md"
-    content = workflows_file.read_text()
-
-    # Find the section for this machine
-    pattern = rf"## {machine_name}\n(.*?)```orca\n(.*?)\n```"
-    match = re.search(pattern, content, re.DOTALL)
-    if match:
-        return match.group(2)
-    raise ValueError(f"Machine '{machine_name}' not found in workflows.orca.md")
+def _load_machines():
+    """Load all machines from workflows.orca.md."""
+    content = Path(__file__).parent / "workflows.orca.md"
+    return parse_orca_multi(content.read_text())
 
 
 async def demo_order_processor():
@@ -123,10 +117,11 @@ async def demo_custom_machine():
     print("DEMO 4: PARSED ORCA MACHINE DEFINITION")
     print("=" * 60 + "\n")
 
-    orca_source = _load_orca_from_markdown("PaymentProcessor")
+    machines = _load_machines()
+    # PaymentProcessor is 3rd machine (index 2)
+    definition = machines[2]
 
     print(f"> Parsing Orca source from workflows.orca.md...")
-    definition = parse_orca(orca_source)
     print(f"  Machine: {definition.name}")
     print(f"  States: {[s.name for s in definition.states]}")
     print(f"  Initial: {definition.initial_state}")
@@ -142,6 +137,37 @@ async def demo_custom_machine():
     await machine.send(OrcaEvent("SUCCESS", {}))
     print(f"  State: {machine.state}")
     print(f"  Is final: {machine.is_final_state()}")
+
+
+async def demo_decision_table_evaluator():
+    """Demo 5: Decision Table Evaluator standalone."""
+    print("\n" + "=" * 60)
+    print("DEMO 5: DECISION TABLE - ORDER ROUTING")
+    print("=" * 60 + "\n")
+
+    test_cases = [
+        # (order_value, customer_tier, item_category, destination, description)
+        (50.00, "standard", "standard", "domestic", "Low-value domestic standard order"),
+        (75.00, "vip", "standard", "international", "Low-value VIP international order"),
+        (250.00, "premium", "fragile", "domestic", "Medium-value premium fragile order"),
+        (750.00, "standard", "standard", "domestic", "High-value standard order"),
+        (1200.00, "vip", "standard", "international", "High-value VIP international order"),
+        (80.00, "standard", "hazmat", "domestic", "Hazmat item (triggers special handling)"),
+        (600.00, "premium", "standard", "domestic", "High-value premium domestic order"),
+    ]
+
+    for value, tier, category, dest, description in test_cases:
+        result = evaluate_order_routing(value, tier, category, dest)
+        print(f"Case: {description}")
+        print(f"  Input: value=${value}, tier={tier}, category={category}, dest={dest}")
+        print(f"  -> {result.shipping_tier} shipping, warehouse={result.warehouse}, "
+              f"fraud_check={result.fraud_check_level}")
+        print()
+
+
+async def demo_order_fulfillment():
+    """Demo 6: Order Fulfillment with Decision Table routing."""
+    await run_order_fulfillment_demo()
 
 
 async def main():
@@ -165,6 +191,12 @@ Combining Orca state machines with agent_framework event bus.
 
     # Demo 4: Custom parsed machine
     await demo_custom_machine()
+
+    # Demo 5: Decision Table Evaluator
+    await demo_decision_table_evaluator()
+
+    # Demo 6: Order Fulfillment with Decision Table routing
+    await demo_order_fulfillment()
 
     print("\n" + "=" * 60)
     print("ALL DEMOS COMPLETED")

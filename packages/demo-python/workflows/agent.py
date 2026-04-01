@@ -1,36 +1,29 @@
 """Agent Task Supervisor - Demonstrates multi-agent orchestration with event bus."""
 
 import asyncio
-import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from bus import DomainEvent, EventType, get_event_bus
 from bus.decorators import on_event
-from orca import parse_orca, OrcaMachine
+from orca import parse_orca_multi, OrcaMachine
 from orca.types import Context, Event as OrcaEvent
 
 
-def _load_orca_from_markdown(machine_name: str) -> str:
-    """Extract an Orca machine definition from workflows.orca.md."""
+def _load_machines():
+    """Load all machines from workflows.orca.md."""
     workflows_file = Path(__file__).parent.parent / "workflows.orca.md"
     content = workflows_file.read_text()
-
-    # Find the section for this machine
-    pattern = rf"## {machine_name}\n(.*?)```orca\n(.*?)\n```"
-    match = re.search(pattern, content, re.DOTALL)
-    if match:
-        return match.group(2)
-    raise ValueError(f"Machine '{machine_name}' not found in workflows.orca.md")
+    return parse_orca_multi(content)
 
 
-# Load Orca machine definition from markdown
-AGENT_SUPERVISOR_ORCA = _load_orca_from_markdown("AgentSupervisor")
+# Load machines once at module level
+_MACHINES = _load_machines()
 
 
 def create_agent_supervisor() -> OrcaMachine:
     """Create an agent supervisor state machine."""
-    definition = parse_orca(AGENT_SUPERVISOR_ORCA)
+    definition = _MACHINES[1]  # AgentSupervisor is 2nd machine
 
     def assign_task(ctx: Context, event: OrcaEvent):
         ctx.set("task_id", event.data.get("task_id", ""))

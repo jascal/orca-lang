@@ -1,5 +1,7 @@
 // Orca AST Type Definitions
 
+import { DecisionTableDef } from './dt-ast.js';
+
 export interface Position {
   line: number;
   column: number;
@@ -228,6 +230,7 @@ export interface MachineDef {
 // Multi-machine file (for machine invocation)
 export interface OrcaFile {
   machines: MachineDef[];
+  decisionTables: DecisionTableDef[];  // NEW
 }
 
 export interface ParseResult {

@@ -88,12 +88,12 @@ jobs:
       - name: Test
         run: pnpm test
 
-  # ── Version bump (only if packages changed + build passed) ─────────────────
+  # ── Version bump (only on main after build passes) ────────────────────────
   version:
     name: Version bump
     runs-on: ubuntu-latest
     needs: [detect-changes, build]
-    if: needs.detect-changes.outputs.has-changes == 'true'
+    if: needs.detect-changes.outputs.has-changes == 'true' && github.ref == 'refs/heads/main'
     outputs:
       tag: v${{ steps.version.outputs.version }}
       has-version-bump: ${{ steps.version.outputs.bumped }}

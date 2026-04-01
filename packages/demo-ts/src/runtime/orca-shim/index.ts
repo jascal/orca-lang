@@ -64,5 +64,6 @@ export function createOrcaMachine(
     stop: () => machine.stop(),
     send: (event: any) => machine.send(event),
     getState: () => ({ value: machine.currentState.toString(), context: machine.context }),
+    registerAction: (name: string, handler: any) => machine.registerAction(name, handler),
   };
 }
