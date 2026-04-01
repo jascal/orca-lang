@@ -157,9 +157,25 @@ async function runHealthCheck(): Promise<HealthReport> {
   {
     const step: StepResult = { name: 'demo-go:loan', status: 'pending', output: '', duration: 0 };
     const start = Date.now();
+
+    // Build the loan binary first (not pre-built like 'trip')
+    console.log('━━━ Building demo-go:loan binary ━━━');
+    const buildResult = runCommand('cd packages/demo-go && go build -o loan ./cmd/loan 2>&1', REPO_ROOT);
+    if (buildResult.status !== 0) {
+      step.duration = Date.now() - start;
+      step.status = 'failed';
+      step.output = buildResult.stderr || buildResult.stdout;
+      report.steps.push(step);
+      console.log(`  ✗ Build failed (${step.duration}ms): ${step.output}\n`);
+      report.endTime = Date.now();
+      return report;
+    }
+    console.log(`  ✓ Build succeeded (${Date.now() - start}ms)\n`);
+
     console.log('━━━ Running demo-go:loan (loan application) ━━━');
-    const result = runCommand('pnpm run run:demo-go:loan 2>&1', REPO_ROOT);
-    step.duration = Date.now() - start;
+    const runStart = Date.now();
+    const result = runCommand('cd packages/demo-go && ./loan 2>&1', REPO_ROOT);
+    step.duration = Date.now() - runStart;
     step.status = result.status === 0 ? 'success' : 'failed';
     step.output = result.status === 0 ? 'Demo passed' : result.stdout;
     report.steps.push(step);
