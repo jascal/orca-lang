@@ -19,13 +19,13 @@
 - route_decision
 
 ## state idle [initial]
-- ignore: payment_approved, payment_declined, route_decision
+- ignore: *
 
 ## state routing
-- ignore: submit_payment, payment_approved, payment_declined
+- ignore: *
 
 ## state processing
-- ignore: submit_payment, route_decision
+- ignore: *
 
 ## state approved [final]
 > Payment was approved

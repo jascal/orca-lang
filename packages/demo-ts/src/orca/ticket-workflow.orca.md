@@ -41,22 +41,22 @@
 | assign_ticket | `(ctx) -> Context` |
 
 ## state new [initial] "Ticket received, awaiting triage"
-- ignore: TRIAGED, ROUTED, RESOLVED, CLOSED, ESCALATED, REJECTED
+- ignore: *
 
 ## state triaged "Ticket triaged, routing to team"
-- ignore: TICKET_RECEIVED, ROUTED, RESOLVED, CLOSED, ESCALATED
+- ignore: *
 
 ## state routed "Ticket routed to team/agent"
-- ignore: TICKET_RECEIVED, TRIAGED, RESOLVED, CLOSED, REJECTED
+- ignore: *
 
 ## state handling "Agent working on ticket"
-- ignore: TICKET_RECEIVED, TRIAGED, ROUTED, CLOSED, ESCALATED, REJECTED
+- ignore: *
 
 ## state resolved "Ticket resolved, awaiting closure"
-- ignore: TICKET_RECEIVED, TRIAGED, ROUTED, RESOLVED, ESCALATED, REJECTED
+- ignore: *
 
 ## state escalated "Ticket escalated to higher tier"
-- ignore: TICKET_RECEIVED, TRIAGED, RESOLVED, CLOSED, ESCALATED, REJECTED
+- ignore: *
 
 ## state closed [final] "Ticket closed"
 
@@ -72,6 +72,7 @@
 | routed | ROUTED | | handling | assign_ticket |
 | routed | ESCALATED | | escalated | |
 | handling | RESOLVED | | resolved | |
+| handling | ESCALATED | | escalated | |
 | resolved | CLOSED | | closed | |
 | escalated | ROUTED | | handling | assign_ticket |
 

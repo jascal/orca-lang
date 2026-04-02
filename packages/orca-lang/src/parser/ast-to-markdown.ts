@@ -101,7 +101,8 @@ function emitStates(states: StateDef[], level: number): string[] {
     if (state.onEntry) lines.push(`- on_entry: ${state.onEntry}`);
     if (state.onExit) lines.push(`- on_exit: ${state.onExit}`);
     if (state.timeout) lines.push(`- timeout: ${state.timeout.duration} -> ${state.timeout.target}`);
-    if (state.ignoredEvents?.length) lines.push(`- ignore: ${state.ignoredEvents.join(', ')}`);
+    if (state.ignoredAll) lines.push(`- ignore: *`);
+    else if (state.ignoredEvents?.length) lines.push(`- ignore: ${state.ignoredEvents.join(', ')}`);
     if (state.onDone) lines.push(`- on_done: -> ${state.onDone}`);
 
     if (state.parallel) {

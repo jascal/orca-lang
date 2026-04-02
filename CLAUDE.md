@@ -173,3 +173,6 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 - `any-final` sync strategy has no native XState equivalent — works in standalone runtimes only
 - Nested parallel (parallel inside a region) is disallowed for v1
 - Mermaid parallel rendering depends on renderer support for `--` syntax in `stateDiagram-v2`
+
+## Known Limitations (completeness / ignore syntax)
+- `- ignore: EVENT` and `- ignore: *` are misleading names: they read as "this state ignores these events entirely" but the actual semantic is "use discard-as-default for events that arrive in this state with no matching transition." Transitions always take precedence; ignore is a fallback policy, not an override. A clearer syntax would be `- unhandled: discard` or a machine-level `## ignore_policy: implicit` declaration. This is a pre-existing naming issue in the language spec — not introduced by the `ignore: *` wildcard extension.

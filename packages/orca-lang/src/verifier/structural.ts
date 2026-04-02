@@ -183,7 +183,11 @@ export function analyzeMachine(machine: MachineDef): MachineAnalysis {
     if (fs) {
       // Find the original state definition
       const originalState = findOriginalState(machine.states, fs.simpleName, fs.parentName);
-      if (originalState?.ignoredEvents) {
+      if (originalState?.ignoredAll) {
+        for (const event of machine.events) {
+          info.eventsIgnored.add(event.name);
+        }
+      } else if (originalState?.ignoredEvents) {
         for (const event of originalState.ignoredEvents) {
           info.eventsIgnored.add(event);
         }
