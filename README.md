@@ -90,6 +90,7 @@ The verifier checks this before anything runs: reachability, deadlocks, guard de
 - Machine invocation: one machine calling another, with input mapping and completion events
 - Multi-machine files: multiple machines in one `.orca.md` separated by `---`
 - `## effects` section: named I/O schemas for external side effects
+- **[Decision tables](DECISION_TABLES.md)**: co-located conditional logic without guard explosion — verified for completeness, consistency, and cross-machine reachability
 
 **Verifier**
 - Reachability: every state is reachable from the initial state
@@ -99,6 +100,7 @@ The verifier checks this before anything runs: reachability, deadlocks, guard de
 - Property checking: bounded model checking with BFS — `reachable`, `unreachable`, `passes_through`, `live`, `responds`, `invariant`
 - Cross-machine: cycle detection, child reachability to final state, input mapping validation
 - Effect consistency: `ORPHAN_EFFECT` (declared but unused) and `UNDECLARED_EFFECT` (referenced but not declared)
+- Decision table checks: completeness, consistency, redundancy, coverage gap, dead guards, DT-constrained reachability — see [DECISION_TABLES.md](DECISION_TABLES.md)
 
 **Compilers**
 - XState v5 `createMachine()` config
@@ -125,6 +127,7 @@ packages/
   demo-python/     Agent framework scenarios (uses runtime-python)
   demo-go/         Ride-hailing coordinator — 5 machines (uses runtime-go)
   demo-nanolab/    nanoGPT training orchestrator — 5 machines (uses runtime-python)
+  mcp-server/      MCP server exposing Orca tools to Claude and other agents
 ```
 
 ---
@@ -352,7 +355,7 @@ cd packages/orca-lang && ../../.venv/bin/python -m pytest ../runtime-python/test
 pnpm run test:demo-nanolab
 ```
 
-**Test counts:** 135 orca-lang · 63 runtime-ts · 69 runtime-python · 16 runtime-go · 47 demo-nanolab
+**Test counts:** 233 orca-lang · 63 runtime-ts · 87 runtime-python · 16 runtime-go · 47 demo-nanolab
 
 ---
 
@@ -369,6 +372,15 @@ All in `packages/orca-lang/examples/`:
 | `parallel-order.orca.md` | Parallel regions with sync |
 | `payment-with-properties.orca.md` | Bounded model checking properties |
 | `key-exchange.orca.md` | Multi-machine: client/server key exchange protocol |
+| `invocation-order.orca.md` | Multi-machine: order processing with child invocations |
+| `saas-auth.orca.md` | SaaS authentication and registration flow |
+| `health-check.orca.md` | Health check machine used by the dogfood runner |
+| `simple-discount.orca.md` | Minimal standalone decision table |
+| `payment-routing.orca.md` | Payment gateway router decision table |
+| `shipping-rules.orca.md` | Shipping cost calculator decision table |
+| `payment-with-routing.orca.md` | Combined machine + decision table |
+
+See [DECISION_TABLES.md](DECISION_TABLES.md) for a full guide to decision tables.
 
 ---
 

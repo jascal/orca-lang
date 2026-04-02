@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseMarkdown } from '../src/parser/markdown-parser.js';
-import { verifyDecisionTable, verifyDecisionTables, checkFileContextAlignment, checkDTMachineIntegration } from '../src/verifier/dt-verifier.js';
+import { verifyDecisionTable, verifyDecisionTables, checkFileContextAlignment, checkDTMachineIntegration, computeAlignedDTOutputDomain } from '../src/verifier/dt-verifier.js';
 
 describe('Decision Table Verifier', () => {
   describe('completeness', () => {
@@ -1062,6 +1062,359 @@ ${rules}
 `;
         const errors = checkDTMachineIntegration(parseMarkdown(src).file);
         expect(errors.filter(e => e.code === 'DT_GUARD_DEAD')).toHaveLength(0);
+      });
+    });
+
+    describe('DT_UNREACHABLE_STATE', () => {
+      // Machine with two outcome states guarded by DT output field.
+      // DT only outputs result=a, so the guard `check_b` (ctx.result == 'b') is dead.
+      // State `state_b` is only reachable via a transition guarded by `check_b` — unreachable.
+      const makeUnreachableSrc = (rules: string) => `
+# machine Routing
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| tier | enum | low, high |
+| result | enum | a, b |
+
+## events
+
+- evaluate
+- pick_a
+- pick_b
+
+## state start [initial]
+
+## state evaluated
+
+## state state_a [final]
+
+## state state_b [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start | evaluate | | evaluated | |
+| evaluated | pick_a | check_a | state_a | |
+| evaluated | pick_b | check_b | state_b | |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| check_a | \`ctx.result == 'a'\` |
+| check_b | \`ctx.result == 'b'\` |
+
+---
+
+# decision_table RouteDT
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| result | enum | a, b |
+
+## rules
+
+${rules}
+`;
+
+      it('reports DT_UNREACHABLE_STATE when all paths to a state use dead guards', () => {
+        // DT only ever outputs result=a — check_b is dead, state_b unreachable
+        const src = makeUnreachableSrc(`
+| tier | → result |
+|------|---------|
+| low | a |
+| high | a |
+`);
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        const unreachable = errors.filter(e => e.code === 'DT_UNREACHABLE_STATE');
+        expect(unreachable.length).toBeGreaterThan(0);
+        expect(unreachable.some(e => e.location?.state === 'state_b')).toBe(true);
+      });
+
+      it('does not report DT_UNREACHABLE_STATE when the DT can produce the guard value', () => {
+        // DT outputs both a and b — both states are reachable
+        const src = makeUnreachableSrc(`
+| tier | → result |
+|------|---------|
+| low | a |
+| high | b |
+`);
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_UNREACHABLE_STATE')).toHaveLength(0);
+      });
+
+      it('does not report DT_UNREACHABLE_STATE when state has a non-dead-guarded path', () => {
+        // state_b has TWO transitions: one via check_b (dead) and one via check_always (unguarded)
+        const src = `
+# machine M
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| tier | enum | low, high |
+| result | enum | a, b |
+
+## events
+
+- go
+- pick_b
+
+## state start [initial]
+
+## state state_b [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start | go | check_b | state_b | |
+| start | pick_b | | state_b | |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| check_b | \`ctx.result == 'b'\` |
+
+---
+
+# decision_table D
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| result | enum | a, b |
+
+## rules
+
+| tier | → result |
+|------|---------|
+| low | a |
+| high | a |
+`;
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_UNREACHABLE_STATE')).toHaveLength(0);
+      });
+
+      it('does not report DT_UNREACHABLE_STATE when there are no dead guards', () => {
+        const src = makeUnreachableSrc(`
+| tier | → result |
+|------|---------|
+| low | a |
+| high | b |
+`);
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_UNREACHABLE_STATE')).toHaveLength(0);
+      });
+    });
+
+    describe('computeAlignedDTOutputDomain', () => {
+      it('returns output domain for a single aligned DT', () => {
+        const src = `
+# machine M
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| tier | enum | low, high |
+| result | enum | a, b |
+
+## events
+
+- go
+
+## state s [initial]
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| s | go | | done | |
+
+---
+
+# decision_table D
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| result | enum | a, b |
+
+## rules
+
+| tier | → result |
+|------|---------|
+| low | a |
+| high | b |
+`;
+        const file = parseMarkdown(src).file;
+        const domain = computeAlignedDTOutputDomain(file);
+        expect(domain).toBeDefined();
+        expect(domain!.get('result')).toEqual(new Set(['a', 'b']));
+      });
+
+      it('returns undefined for multi-machine files', () => {
+        const src = `
+# machine A
+
+## events
+- go
+
+## state s [initial]
+## state done [final]
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| s | go | done |
+
+---
+
+# machine B
+
+## events
+- go
+
+## state s [initial]
+## state done [final]
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| s | go | done |
+`;
+        const file = parseMarkdown(src).file;
+        const domain = computeAlignedDTOutputDomain(file);
+        expect(domain).toBeUndefined();
+      });
+
+      it('returns undefined when no DTs are present', () => {
+        const src = `
+# machine M
+
+## events
+- go
+
+## state s [initial]
+## state done [final]
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| s | go | done |
+`;
+        const file = parseMarkdown(src).file;
+        const domain = computeAlignedDTOutputDomain(file);
+        expect(domain).toBeUndefined();
+      });
+
+      it('merges output domains across multiple aligned DTs', () => {
+        const src = `
+# machine M
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| tier | enum | low, high |
+| result | enum | a, b, c |
+| flag | bool | false |
+
+## events
+- go
+
+## state s [initial]
+## state done [final]
+
+## transitions
+
+| Source | Event | Target |
+|--------|-------|--------|
+| s | go | done |
+
+---
+
+# decision_table D1
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| result | enum | a, b, c |
+
+## rules
+
+| tier | → result |
+|------|---------|
+| low | a |
+| high | b |
+
+---
+
+# decision_table D2
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| flag | bool | |
+
+## rules
+
+| tier | → flag |
+|------|--------|
+| low | false |
+| high | true |
+`;
+        const file = parseMarkdown(src).file;
+        const domain = computeAlignedDTOutputDomain(file);
+        expect(domain).toBeDefined();
+        expect(domain!.get('result')).toEqual(new Set(['a', 'b']));
+        expect(domain!.get('flag')).toEqual(new Set(['false', 'true']));
       });
     });
   });

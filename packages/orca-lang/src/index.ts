@@ -22,6 +22,7 @@ import { checkStructural, analyzeFile } from './verifier/structural.js';
 import { checkCompleteness } from './verifier/completeness.js';
 import { checkDeterminism } from './verifier/determinism.js';
 import { checkProperties } from './verifier/properties.js';
+import { computeAlignedDTOutputDomain } from './verifier/dt-verifier.js';
 import { compileToXState, compileToXStateMachine } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { verifySkill, compileSkill, generateActionsSkill, refineSkill, generateOrcaSkill, generateOrcaMultiSkill, parseSkill, type SkillInput } from './skills.js';
@@ -232,7 +233,10 @@ async function verify(input: SkillInput, json: boolean = false): Promise<void> {
   const structural = checkStructural(machine);
   const completeness = checkCompleteness(machine);
   const determinism = checkDeterminism(machine);
-  const properties = checkProperties(machine);
+  const dtOutputDomain = file.decisionTables.length > 0
+    ? computeAlignedDTOutputDomain({ machines: [machine], decisionTables: file.decisionTables })
+    : undefined;
+  const properties = checkProperties(machine, { dtOutputDomain });
 
   const allErrors = [
     ...structural.errors,
