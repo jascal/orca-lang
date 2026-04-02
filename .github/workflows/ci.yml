@@ -165,15 +165,6 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" packages/runtime-python/pyproject.toml
           cat packages/runtime-python/pyproject.toml | grep "^version"
 
-      - name: Bump Go module version
-        if: steps.version.outputs.bumped == 'true'
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          echo "Bumping runtime-go module to v$VERSION"
-          # Update go.mod module version comment
-          sed -i "s|github.com/jascal/orca-lang/packages/runtime-go.*|github.com/jascal/orca-lang/packages/runtime-go v$VERSION|" packages/runtime-go/go.mod
-          grep "module github.com/jascal/orca-lang/packages/runtime-go" packages/runtime-go/go.mod
-
       - name: Bump server.json version
         if: steps.version.outputs.bumped == 'true'
         run: |
