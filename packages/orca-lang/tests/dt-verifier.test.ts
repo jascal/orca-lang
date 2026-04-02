@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseMarkdown } from '../src/parser/markdown-parser.js';
-import { verifyDecisionTable, verifyDecisionTables } from '../src/verifier/dt-verifier.js';
+import { verifyDecisionTable, verifyDecisionTables, checkFileContextAlignment, checkDTMachineIntegration } from '../src/verifier/dt-verifier.js';
 
 describe('Decision Table Verifier', () => {
   describe('completeness', () => {
@@ -614,6 +614,455 @@ ${rules}
 `);
       const verification = verifyDecisionTables(result.file.decisionTables);
       expect(verification.valid).toBe(true);
+    });
+  });
+
+  describe('checkFileContextAlignment (DT_CONTEXT_MISMATCH)', () => {
+    const colocatedSource = (conditionName: string, outputName: string) => `
+# machine TestMachine
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| amount | enum | low, high |
+| result | enum | a, b |
+
+## events
+
+- go
+
+## state start [initial]
+- ignore: go
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start | go | | done | |
+
+---
+
+# decision_table TestDT
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| ${conditionName} | enum | low, high |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| ${outputName} | enum | a, b |
+
+## rules
+
+| ${conditionName} | → ${outputName} |
+|------|--------|
+| low | a |
+| high | b |
+`;
+
+    it('passes when all DT condition and output names match machine context', () => {
+      const result = parseMarkdown(colocatedSource('amount', 'result'));
+      const errors = checkFileContextAlignment(result.file);
+      expect(errors).toHaveLength(0);
+    });
+
+    it('reports DT_CONTEXT_MISMATCH for unrecognized condition name', () => {
+      const result = parseMarkdown(colocatedSource('unknown_cond', 'result'));
+      const errors = checkFileContextAlignment(result.file);
+      expect(errors.some(e => e.code === 'DT_CONTEXT_MISMATCH')).toBe(true);
+      const err = errors.find(e => e.code === 'DT_CONTEXT_MISMATCH');
+      expect(err?.location?.condition).toBe('unknown_cond');
+    });
+
+    it('reports DT_CONTEXT_MISMATCH for unrecognized output name', () => {
+      const result = parseMarkdown(colocatedSource('amount', 'unknown_output'));
+      const errors = checkFileContextAlignment(result.file);
+      expect(errors.some(e => e.code === 'DT_CONTEXT_MISMATCH')).toBe(true);
+      const err = errors.find(e => e.code === 'DT_CONTEXT_MISMATCH');
+      expect(err?.location?.action).toBe('unknown_output');
+    });
+
+    it('skips alignment check for multi-machine files', () => {
+      const multiMachine = `
+# machine Machine1
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| x | enum | a, b |
+
+## events
+
+- go
+
+## state s1 [initial]
+## state s2 [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| s1 | go | | s2 | |
+
+---
+
+# machine Machine2
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| y | enum | a, b |
+
+## events
+
+- go
+
+## state s1 [initial]
+## state s2 [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| s1 | go | | s2 | |
+
+---
+
+# decision_table SomeDT
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| unrelated_field | enum | a, b |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| another_field | enum | a, b |
+
+## rules
+
+| unrelated_field | → another_field |
+|-------|--------|
+| a | a |
+| b | b |
+`;
+      const result = parseMarkdown(multiMachine);
+      const errors = checkFileContextAlignment(result.file);
+      expect(errors).toHaveLength(0);
+    });
+
+    it('skips alignment check when no decision tables present', () => {
+      const machineOnly = `
+# machine TestMachine
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| x | enum | a, b |
+
+## events
+
+- go
+
+## state s1 [initial]
+## state s2 [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| s1 | go | | s2 | |
+`;
+      const result = parseMarkdown(machineOnly);
+      const errors = checkFileContextAlignment(result.file);
+      expect(errors).toHaveLength(0);
+    });
+  });
+
+  describe('checkDTMachineIntegration', () => {
+    // Base source: machine with enum+bool context, fully aligned DT
+    const makeSource = (rules: string, guards = '') => `
+# machine TestMachine
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| tier | enum | low, high |
+| urgent | bool | false |
+| result | enum | a, b |
+| flag | bool | false |
+
+## events
+
+- go
+
+## state start [initial]
+- ignore: go
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start | go | | done | |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+${guards}
+
+---
+
+# decision_table TestDT
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+| urgent | bool | |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| result | enum | a, b |
+| flag | bool | |
+
+## rules
+
+${rules}
+`;
+
+    describe('DT_COVERAGE_GAP', () => {
+      it('passes when DT covers all machine context combinations', () => {
+        const src = makeSource(`
+| tier | urgent | → result | → flag |
+|------|--------|----------|--------|
+| low | true | a | true |
+| low | false | a | false |
+| high | true | b | true |
+| high | false | b | false |
+`);
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_COVERAGE_GAP')).toHaveLength(0);
+      });
+
+      it('passes when DT has a catch-all rule', () => {
+        const src = makeSource(`
+| tier | urgent | → result | → flag |
+|------|--------|----------|--------|
+| high | true | b | true |
+| - | - | a | false |
+`);
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_COVERAGE_GAP')).toHaveLength(0);
+      });
+
+      it('reports DT_COVERAGE_GAP when a machine enum value has no matching rule', () => {
+        // DT only covers (high, true) and (high, false) — misses both (low, *) cases
+        const src = makeSource(`
+| tier | urgent | → result | → flag |
+|------|--------|----------|--------|
+| high | true | b | true |
+| high | false | b | false |
+`);
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        const gaps = errors.filter(e => e.code === 'DT_COVERAGE_GAP');
+        expect(gaps.length).toBeGreaterThan(0);
+        expect(gaps.some(e => e.message.includes('tier=low'))).toBe(true);
+      });
+
+      it('reports DT_COVERAGE_GAP for missing bool branch', () => {
+        // Only covers urgent=true, not urgent=false
+        const src = makeSource(`
+| tier | urgent | → result | → flag |
+|------|--------|----------|--------|
+| low | true | a | true |
+| high | true | b | true |
+`);
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        const gaps = errors.filter(e => e.code === 'DT_COVERAGE_GAP');
+        expect(gaps.length).toBeGreaterThan(0);
+        expect(gaps.some(e => e.message.includes('urgent=false'))).toBe(true);
+      });
+
+      it('skips DT_COVERAGE_GAP when DT is not aligned with machine context', () => {
+        // Unaligned condition name means alignment check would fail, integration skips
+        const src = `
+# machine M
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| tier | enum | low, high |
+
+## events
+
+- go
+
+## state s [initial]
+- ignore: go
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| s | go | | done | |
+
+---
+
+# decision_table D
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| unknown_field | enum | x, y |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | low, high |
+
+## rules
+
+| unknown_field | → tier |
+|-------|--------|
+| x | low |
+| y | high |
+`;
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_COVERAGE_GAP')).toHaveLength(0);
+      });
+    });
+
+    describe('DT_GUARD_DEAD', () => {
+      it('passes when guard compares against a value the DT can produce', () => {
+        const src = makeSource(
+          `
+| tier | urgent | → result | → flag |
+|------|--------|----------|--------|
+| low | - | a | false |
+| high | - | b | true |
+`,
+          `| check_a | \`ctx.result == 'a'\` |`
+        );
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_GUARD_DEAD')).toHaveLength(0);
+      });
+
+      it('reports DT_GUARD_DEAD when guard value is never produced by the DT', () => {
+        // DT only outputs result=a or result=b, never result=c
+        const src = makeSource(
+          `
+| tier | urgent | → result | → flag |
+|------|--------|----------|--------|
+| low | - | a | false |
+| high | - | b | true |
+`,
+          `| impossible | \`ctx.result == 'c'\` |`
+        );
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        const dead = errors.filter(e => e.code === 'DT_GUARD_DEAD');
+        expect(dead.length).toBeGreaterThan(0);
+        expect(dead[0].message).toContain("'c'");
+        expect(dead[0].message).toContain('result');
+      });
+
+      it('does not report DT_GUARD_DEAD for guards on non-DT-output fields', () => {
+        // tier is a condition (input), not a DT output
+        const src = makeSource(
+          `
+| tier | urgent | → result | → flag |
+|------|--------|----------|--------|
+| - | - | a | false |
+`,
+          `| check_tier | \`ctx.tier == 'low'\` |`
+        );
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_GUARD_DEAD')).toHaveLength(0);
+      });
+
+      it('does not report DT_GUARD_DEAD for non-equality operators', () => {
+        // lt/gt guards on DT output fields are not checked (too complex to reason about)
+        const src = `
+# machine M
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| score | int | 0 |
+| level | enum | low, high |
+
+## events
+
+- go
+
+## state s [initial]
+- ignore: go
+
+## state done [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| s | go | | done | |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| high_score | \`ctx.score > 100\` |
+
+---
+
+# decision_table D
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| level | enum | low, high |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int | |
+
+## rules
+
+| level | → score |
+|-------|---------|
+| low | 50 |
+| high | 200 |
+`;
+        const errors = checkDTMachineIntegration(parseMarkdown(src).file);
+        expect(errors.filter(e => e.code === 'DT_GUARD_DEAD')).toHaveLength(0);
+      });
     });
   });
 });
