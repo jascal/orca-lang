@@ -8,7 +8,7 @@ import { compileToXState } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { MachineDef, StateDef, GuardExpression, Type } from './parser/ast.js';
 import { DecisionTableDef } from './parser/dt-ast.js';
-import { verifyDecisionTable, verifyDecisionTables, checkFileContextAlignment, checkDTMachineIntegration } from './verifier/dt-verifier.js';
+import { verifyDecisionTable, verifyDecisionTables, checkFileContextAlignment, checkDTMachineIntegration, computeAlignedDTOutputDomain } from './verifier/dt-verifier.js';
 import {
   compileDecisionTableToTypeScript,
   compileDecisionTableToPython,
@@ -283,10 +283,11 @@ export async function verifySkill(input: SkillInput): Promise<VerifySkillResult>
   const structural = checkStructural(machine);
   const completeness = checkCompleteness(machine);
   const determinism = checkDeterminism(machine);
-  const properties = checkProperties(machine);
 
   // Check co-located decision table alignment and machine integration (single-machine files only)
   const orcaFile = { machines: [machine], decisionTables: fileDecisionTables };
+  const dtOutputDomain = fileDecisionTables.length > 0 ? computeAlignedDTOutputDomain(orcaFile) : undefined;
+  const properties = checkProperties(machine, { dtOutputDomain });
   const dtAlignment = fileDecisionTables.length > 0
     ? checkFileContextAlignment(orcaFile)
     : [];

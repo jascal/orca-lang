@@ -533,3 +533,169 @@ describe('Payment Processor with Properties', () => {
     expect(result.errors.some(e => e.code === 'PROPERTY_INVARIANT_ADVISORY')).toBe(true);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// DT-aware properties: dtOutputDomain option
+// ────────────────────────────────────────────────────────────────────────────
+
+describe('checkProperties with dtOutputDomain', () => {
+  // Machine: start → evaluated → (state_a via check_a | state_b via check_b)
+  // Guard check_a: ctx.result == 'a', check_b: ctx.result == 'b'
+  // With DT domain {result: {'a'}}, check_b is domain-blocked → state_b unreachable
+  const routingMachine = parseMachine(`
+# machine Routing
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| result | enum | a, b |
+
+## events
+
+- evaluate
+- pick_a
+- pick_b
+
+## state start [initial]
+
+## state evaluated
+
+## state state_a [final]
+
+## state state_b [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start | evaluate | | evaluated | |
+| evaluated | pick_a | check_a | state_a | |
+| evaluated | pick_b | check_b | state_b | |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| check_a | \`ctx.result == 'a'\` |
+| check_b | \`ctx.result == 'b'\` |
+
+## properties
+
+- reachable: state_b from start
+`);
+
+  it('PROPERTY_REACHABILITY_FAIL with dtOutputDomain when domain blocks the only path', () => {
+    // Domain says result can only be 'a' — check_b (result=='b') is blocked
+    const domain = new Map([['result', new Set(['a'])]]);
+    const result = checkProperties(routingMachine, { dtOutputDomain: domain });
+    expect(result.errors.some(e => e.code === 'PROPERTY_REACHABILITY_FAIL')).toBe(true);
+  });
+
+  it('passes reachable property without dtOutputDomain (guard not statically false)', () => {
+    // Without domain, check_b is treated as possibly true
+    const result = checkProperties(routingMachine);
+    expect(result.errors.filter(e => e.code === 'PROPERTY_REACHABILITY_FAIL')).toHaveLength(0);
+  });
+
+  it('passes reachable property when domain includes the guard value', () => {
+    // Domain includes both 'a' and 'b' — check_b is satisfiable, state_b reachable
+    const domain = new Map([['result', new Set(['a', 'b'])]]);
+    const result = checkProperties(routingMachine, { dtOutputDomain: domain });
+    expect(result.errors.filter(e => e.code === 'PROPERTY_REACHABILITY_FAIL')).toHaveLength(0);
+  });
+
+  it('domain blocking applies to unreachable property (removes false positive)', () => {
+    // With domain {result: {'a'}}, the path to state_b is blocked
+    // An `unreachable: state_b from start` property should PASS
+    const machineWithUnreachable = parseMachine(`
+# machine Routing2
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| result | enum | a, b |
+
+## events
+
+- evaluate
+- pick_b
+
+## state start [initial]
+
+## state state_b [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start | evaluate | check_b | state_b | |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| check_b | \`ctx.result == 'b'\` |
+
+## properties
+
+- unreachable: state_b from start
+`);
+
+    // Without domain: check_b is treated as possibly true → path exists → property violated
+    const withoutDomain = checkProperties(machineWithUnreachable);
+    expect(withoutDomain.errors.some(e => e.code === 'PROPERTY_EXCLUSION_FAIL')).toBe(true);
+
+    // With domain {result: {'a'}}: check_b blocked → no path → property passes
+    const domain = new Map([['result', new Set(['a'])]]);
+    const withDomain = checkProperties(machineWithUnreachable, { dtOutputDomain: domain });
+    expect(withDomain.errors.filter(e => e.code === 'PROPERTY_EXCLUSION_FAIL')).toHaveLength(0);
+  });
+
+  it('domain blocking works for AND guards (both branches must be unblocked)', () => {
+    const machine = parseMachine(`
+# machine AndGuard
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| result | enum | a, b |
+| flag | bool | false |
+
+## events
+
+- go
+
+## state start [initial]
+
+## state target [final]
+
+## transitions
+
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start | go | check_ab | target | |
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| check_ab | \`ctx.result == 'b' and ctx.flag == 'true'\` |
+
+## properties
+
+- reachable: target from start
+`);
+
+    // Without domain: guard might be true → target reachable → no violation
+    const withoutDomain = checkProperties(machine);
+    expect(withoutDomain.errors.filter(e => e.code === 'PROPERTY_REACHABILITY_FAIL')).toHaveLength(0);
+
+    // With domain {result: {'a'}}: result=='b' blocked → AND is false → target unreachable
+    const domain = new Map([['result', new Set(['a'])]]);
+    const withDomain = checkProperties(machine, { dtOutputDomain: domain });
+    expect(withDomain.errors.some(e => e.code === 'PROPERTY_REACHABILITY_FAIL')).toBe(true);
+  });
+});

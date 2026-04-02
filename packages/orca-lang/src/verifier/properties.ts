@@ -1,4 +1,4 @@
-import { MachineDef, Property, ReachabilityProperty, PassesThroughProperty, RespondsProperty, InvariantProperty, GuardRef, GuardDef } from '../parser/ast.js';
+import { MachineDef, Property, ReachabilityProperty, PassesThroughProperty, RespondsProperty, InvariantProperty, GuardRef, GuardDef, GuardExpression } from '../parser/ast.js';
 import { VerificationResult, VerificationError, MachineAnalysis, StateInfo } from './types.js';
 import { analyzeMachine, flattenStates, FlattenedState } from './structural.js';
 import { resolveGuardExpression, isExpressionStaticallyFalse } from './determinism.js';
@@ -6,24 +6,61 @@ import { resolveGuardExpression, isExpressionStaticallyFalse } from './determini
 const DEFAULT_MAX_STATES = 64;
 
 /**
+ * Check if a guard expression is statically false given DT output domain constraints.
+ * A comparison `ctx.field == value` is false if the DT never outputs `value` for `field`.
+ * Handles AND (false if either branch is domain-blocked) and OR (false only if both are).
+ */
+function isExpressionBlockedByDomain(
+  expr: GuardExpression,
+  domain: Map<string, Set<string>>
+): boolean {
+  if (expr.kind === 'compare' && expr.op === 'eq') {
+    if (expr.left.path.length === 2 && expr.left.path[0] === 'ctx') {
+      const field = expr.left.path[1];
+      const value = String(expr.right.value);
+      const possible = domain.get(field);
+      if (possible !== undefined && !possible.has(value)) return true;
+    }
+  }
+  if (expr.kind === 'and') {
+    return isExpressionBlockedByDomain(expr.left, domain) ||
+           isExpressionBlockedByDomain(expr.right, domain);
+  }
+  if (expr.kind === 'or') {
+    return isExpressionBlockedByDomain(expr.left, domain) &&
+           isExpressionBlockedByDomain(expr.right, domain);
+  }
+  return false;
+}
+
+/**
  * Check if a transition's guard is statically false (can never fire).
  * Used in guard-aware BFS to prune impossible transitions.
+ * When dtOutputDomain is provided, also prunes guards that compare DT output
+ * fields against values the DT never produces.
  */
 function isTransitionStaticallyBlocked(
   transition: { guard?: GuardRef },
-  guardDefs: Map<string, GuardDef>
+  guardDefs: Map<string, GuardDef>,
+  dtOutputDomain?: Map<string, Set<string>>
 ): boolean {
   if (!transition.guard) return false; // No guard = always possible
 
   const resolved = resolveGuardExpression(transition.guard, guardDefs);
   if (!resolved) return false; // Can't resolve = assume possible
 
-  return isExpressionStaticallyFalse(resolved);
+  if (isExpressionStaticallyFalse(resolved)) return true;
+
+  if (dtOutputDomain && isExpressionBlockedByDomain(resolved, dtOutputDomain)) return true;
+
+  return false;
 }
 
 /**
  * BFS from source state, returning reachable set and parent map for counterexample traces.
  * Supports guard-aware mode: skips transitions with statically false guards.
+ * When dtOutputDomain is provided, also skips transitions whose guards are impossible
+ * given the DT output domain constraints.
  */
 function bfs(
   stateMap: Map<string, StateInfo>,
@@ -31,7 +68,8 @@ function bfs(
   options?: {
     excludeState?: string;
     maxDepth?: number;
-    guardDefs?: Map<string, GuardDef>;  // Enable guard-aware pruning
+    guardDefs?: Map<string, GuardDef>;
+    dtOutputDomain?: Map<string, Set<string>>;
   }
 ): { reachable: Set<string>; parent: Map<string, { state: string; event: string; guard?: string }> } {
   const reachable = new Set<string>();
@@ -56,8 +94,8 @@ function bfs(
       // Skip excluded state
       if (options?.excludeState && target === options.excludeState) continue;
 
-      // Guard-aware: skip transitions with statically false guards
-      if (options?.guardDefs && isTransitionStaticallyBlocked(t, options.guardDefs)) continue;
+      // Guard-aware: skip transitions with statically false guards (including DT domain constraints)
+      if (options?.guardDefs && isTransitionStaticallyBlocked(t, options.guardDefs, options.dtOutputDomain)) continue;
 
       if (!reachable.has(target)) {
         reachable.add(target);
@@ -157,7 +195,8 @@ function checkReachable(
   prop: ReachabilityProperty,
   analysis: MachineAnalysis,
   flattenedStates: FlattenedState[],
-  guardDefs: Map<string, GuardDef>
+  guardDefs: Map<string, GuardDef>,
+  dtOutputDomain?: Map<string, Set<string>>
 ): VerificationError[] {
   const errors: VerificationError[] = [];
 
@@ -166,7 +205,7 @@ function checkReachable(
   const toRes = resolveStateName(prop.to, flattenedStates);
   if (toRes.error) return [toRes.error];
 
-  const { reachable } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs });
+  const { reachable } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs, dtOutputDomain });
 
   if (!reachable.has(toRes.resolved)) {
     errors.push({
@@ -185,7 +224,8 @@ function checkUnreachable(
   prop: ReachabilityProperty,
   analysis: MachineAnalysis,
   flattenedStates: FlattenedState[],
-  guardDefs: Map<string, GuardDef>
+  guardDefs: Map<string, GuardDef>,
+  dtOutputDomain?: Map<string, Set<string>>
 ): VerificationError[] {
   const errors: VerificationError[] = [];
 
@@ -194,7 +234,7 @@ function checkUnreachable(
   const toRes = resolveStateName(prop.to, flattenedStates);
   if (toRes.error) return [toRes.error];
 
-  const { reachable, parent } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs });
+  const { reachable, parent } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs, dtOutputDomain });
 
   if (reachable.has(toRes.resolved)) {
     const path = reconstructPath(parent, fromRes.resolved, toRes.resolved);
@@ -218,7 +258,8 @@ function checkPassesThrough(
   prop: PassesThroughProperty,
   analysis: MachineAnalysis,
   flattenedStates: FlattenedState[],
-  guardDefs: Map<string, GuardDef>
+  guardDefs: Map<string, GuardDef>,
+  dtOutputDomain?: Map<string, Set<string>>
 ): VerificationError[] {
   const errors: VerificationError[] = [];
 
@@ -230,7 +271,7 @@ function checkPassesThrough(
   if (throughRes.error) return [throughRes.error];
 
   // First check: is target reachable from source at all?
-  const { reachable: fullReachable } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs });
+  const { reachable: fullReachable } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs, dtOutputDomain });
   if (!fullReachable.has(toRes.resolved)) {
     errors.push({
       code: 'PROPERTY_PATH_FAIL',
@@ -246,6 +287,7 @@ function checkPassesThrough(
   const { reachable: withoutThrough, parent } = bfs(analysis.stateMap, fromRes.resolved, {
     excludeState: throughRes.resolved,
     guardDefs,
+    dtOutputDomain,
   });
 
   if (withoutThrough.has(toRes.resolved)) {
@@ -265,14 +307,15 @@ function checkPassesThrough(
 function checkLive(
   analysis: MachineAnalysis,
   flattenedStates: FlattenedState[],
-  guardDefs: Map<string, GuardDef>
+  guardDefs: Map<string, GuardDef>,
+  dtOutputDomain?: Map<string, Set<string>>
 ): VerificationError[] {
   const errors: VerificationError[] = [];
 
   if (!analysis.initialState) return errors;
 
   // Find all reachable states from initial
-  const { reachable: reachableFromInitial } = bfs(analysis.stateMap, analysis.initialState.name, { guardDefs });
+  const { reachable: reachableFromInitial } = bfs(analysis.stateMap, analysis.initialState.name, { guardDefs, dtOutputDomain });
 
   // Find all final state names
   const finalStateNames = new Set(analysis.finalStates.map(s => s.name));
@@ -285,7 +328,7 @@ function checkLive(
     const fs = flattenedStates.find(f => f.name === stateName);
     if (fs && (fs.isCompound || fs.isRegion)) continue;
 
-    const { reachable: reachableFromState } = bfs(analysis.stateMap, stateName, { guardDefs });
+    const { reachable: reachableFromState } = bfs(analysis.stateMap, stateName, { guardDefs, dtOutputDomain });
 
     let canReachFinal = false;
     for (const finalName of finalStateNames) {
@@ -313,7 +356,8 @@ function checkResponds(
   prop: RespondsProperty,
   analysis: MachineAnalysis,
   flattenedStates: FlattenedState[],
-  guardDefs: Map<string, GuardDef>
+  guardDefs: Map<string, GuardDef>,
+  dtOutputDomain?: Map<string, Set<string>>
 ): VerificationError[] {
   const errors: VerificationError[] = [];
 
@@ -325,11 +369,12 @@ function checkResponds(
   const { reachable } = bfs(analysis.stateMap, fromRes.resolved, {
     maxDepth: prop.within,
     guardDefs,
+    dtOutputDomain,
   });
 
   if (!reachable.has(toRes.resolved)) {
     // Check if it's reachable at all (just beyond the bound)
-    const { reachable: unbounded } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs });
+    const { reachable: unbounded } = bfs(analysis.stateMap, fromRes.resolved, { guardDefs, dtOutputDomain });
     const reachableButBeyondBound = unbounded.has(toRes.resolved);
 
     const suffix = reachableButBeyondBound
@@ -453,7 +498,16 @@ function checkMachineSize(
 
 // --- Main entry point ---
 
-export function checkProperties(machine: MachineDef, options?: { maxStates?: number }): VerificationResult {
+export function checkProperties(
+  machine: MachineDef,
+  options?: {
+    maxStates?: number;
+    /** DT output domain from co-located aligned decision tables. When provided,
+     *  the guard-aware BFS will prune transitions whose guards compare DT output
+     *  fields against values the DT never produces, giving more precise results. */
+    dtOutputDomain?: Map<string, Set<string>>;
+  }
+): VerificationResult {
   const maxStates = options?.maxStates ?? DEFAULT_MAX_STATES;
   const flattenedStates = flattenStates(machine.states);
   const errors: VerificationError[] = [];
@@ -470,6 +524,7 @@ export function checkProperties(machine: MachineDef, options?: { maxStates?: num
   }
 
   const analysis = analyzeMachine(machine);
+  const dtOutputDomain = options?.dtOutputDomain;
 
   // Build guard definition map for guard-aware BFS
   const guardDefs = new Map<string, GuardDef>();
@@ -480,19 +535,19 @@ export function checkProperties(machine: MachineDef, options?: { maxStates?: num
   for (const prop of machine.properties) {
     switch (prop.kind) {
       case 'reachable':
-        errors.push(...checkReachable(prop, analysis, flattenedStates, guardDefs));
+        errors.push(...checkReachable(prop, analysis, flattenedStates, guardDefs, dtOutputDomain));
         break;
       case 'unreachable':
-        errors.push(...checkUnreachable(prop, analysis, flattenedStates, guardDefs));
+        errors.push(...checkUnreachable(prop, analysis, flattenedStates, guardDefs, dtOutputDomain));
         break;
       case 'passes_through':
-        errors.push(...checkPassesThrough(prop, analysis, flattenedStates, guardDefs));
+        errors.push(...checkPassesThrough(prop, analysis, flattenedStates, guardDefs, dtOutputDomain));
         break;
       case 'live':
-        errors.push(...checkLive(analysis, flattenedStates, guardDefs));
+        errors.push(...checkLive(analysis, flattenedStates, guardDefs, dtOutputDomain));
         break;
       case 'responds':
-        errors.push(...checkResponds(prop, analysis, flattenedStates, guardDefs));
+        errors.push(...checkResponds(prop, analysis, flattenedStates, guardDefs, dtOutputDomain));
         break;
       case 'invariant':
         errors.push(...checkInvariant(prop, machine, flattenedStates));

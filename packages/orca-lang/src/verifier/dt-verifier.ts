@@ -737,6 +737,39 @@ function collectFieldComparisons(
 }
 
 /**
+ * Compute the set of guard names that test a DT output field against a value
+ * the DT never produces. These guards are always false after the DT action fires.
+ */
+function computeDeadGuardNames(dt: DecisionTableDef, machine: MachineDef): Set<string> {
+  const outputDomain = new Map<string, Set<string>>();
+  for (const action of dt.actions) {
+    outputDomain.set(action.name, new Set<string>());
+  }
+  for (const rule of dt.rules) {
+    for (const [name, value] of rule.actions) {
+      outputDomain.get(name)?.add(value);
+    }
+  }
+
+  const outputFields = new Set(dt.actions.map(a => a.name));
+  const dead = new Set<string>();
+
+  for (const guardDef of machine.guards) {
+    const comparisons = collectFieldComparisons(guardDef.expression);
+    for (const { field, op, value } of comparisons) {
+      if (!outputFields.has(field)) continue;
+      if (op !== 'eq') continue;
+      const possible = outputDomain.get(field)!;
+      if (!possible.has(value)) {
+        dead.add(guardDef.name);
+      }
+    }
+  }
+
+  return dead;
+}
+
+/**
  * DT_GUARD_DEAD: A guard that compares a DT output field against a value the DT
  * never produces is a dead guard — it can never be true immediately after the
  * DT action fires. Reported as a warning since another action might set the field.
@@ -781,10 +814,67 @@ function checkDTGuardDead(dt: DecisionTableDef, machine: MachineDef): Verificati
 }
 
 /**
- * Check DT integration with the machine: coverage gap (DT must handle all machine
- * context inputs) and dead guards (guards on DT output fields must be satisfiable).
- * Only runs when exactly one machine is present and the DT is fully aligned.
- * Multi-machine files are skipped (ambiguous ownership).
+ * BFS from initial state, optionally skipping transitions guarded by dead guards.
+ * A non-negated transition guarded by a name in `deadGuards` is skipped (never fires).
+ * A negated dead guard (!dead) is NOT skipped — negation of a dead guard is always true.
+ */
+function bfsReachableWithDeadGuards(machine: MachineDef, deadGuards: Set<string>): Set<string> {
+  const initial = machine.states.find(s => s.isInitial);
+  if (!initial) return new Set();
+
+  const visited = new Set<string>();
+  const queue = [initial.name];
+
+  while (queue.length > 0) {
+    const state = queue.shift()!;
+    if (visited.has(state)) continue;
+    visited.add(state);
+
+    for (const t of machine.transitions) {
+      if (t.source !== state) continue;
+      // A non-negated dead guard means the transition can never fire
+      if (t.guard && !t.guard.negated && deadGuards.has(t.guard.name)) continue;
+      if (!visited.has(t.target)) queue.push(t.target);
+    }
+  }
+
+  return visited;
+}
+
+/**
+ * DT_UNREACHABLE_STATE: A state that is graph-reachable but only accessible via
+ * transitions guarded by dead guards — it can never be entered given DT outputs.
+ * Reported as a warning (structural reachability is preserved; the constraint is semantic).
+ */
+function checkDTDeadGuardReachability(dt: DecisionTableDef, machine: MachineDef): VerificationError[] {
+  const deadGuards = computeDeadGuardNames(dt, machine);
+  if (deadGuards.size === 0) return [];
+
+  const plainReachable = bfsReachableWithDeadGuards(machine, new Set());
+  const dtReachable = bfsReachableWithDeadGuards(machine, deadGuards);
+
+  const errors: VerificationError[] = [];
+  const deadList = [...deadGuards].join(', ');
+
+  for (const state of machine.states) {
+    if (plainReachable.has(state.name) && !dtReachable.has(state.name)) {
+      errors.push({
+        code: 'DT_UNREACHABLE_STATE',
+        message: `State '${state.name}' is unreachable given '${dt.name}' output constraints — all entry paths are gated by dead guards (${deadList})`,
+        severity: 'warning',
+        location: { state: state.name, decisionTable: dt.name },
+        suggestion: `Update '${dt.name}' to produce values that satisfy the guards leading to '${state.name}', or revise the guard expressions`,
+      });
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Check DT integration with the machine: coverage gap, dead guards, and
+ * DT-constrained reachability. Only runs when exactly one machine is present
+ * and the DT is fully aligned. Multi-machine files are skipped (ambiguous ownership).
  */
 export function checkDTMachineIntegration(file: OrcaFile): VerificationError[] {
   if (file.machines.length !== 1 || file.decisionTables.length === 0) {
@@ -801,7 +891,38 @@ export function checkDTMachineIntegration(file: OrcaFile): VerificationError[] {
 
     errors.push(...checkDTCoverageGap(dt, contextMap));
     errors.push(...checkDTGuardDead(dt, machine));
+    errors.push(...checkDTDeadGuardReachability(dt, machine));
   }
 
   return errors;
+}
+
+/**
+ * Compute the merged output domain across all aligned DTs in a single-machine file.
+ * Returns a map from DT output field name → set of values the DT(s) can produce.
+ * Used by the properties checker to prune guard-protected transitions that are
+ * semantically impossible given DT output constraints.
+ * Returns undefined if no aligned DTs are found.
+ */
+export function computeAlignedDTOutputDomain(file: OrcaFile): Map<string, Set<string>> | undefined {
+  if (file.machines.length !== 1 || file.decisionTables.length === 0) return undefined;
+  const machine = file.machines[0];
+  const contextMap = new Map(machine.context.map(f => [f.name, f]));
+
+  const domain = new Map<string, Set<string>>();
+
+  for (const dt of file.decisionTables) {
+    const allAligned = [...dt.conditions, ...dt.actions].every(item => contextMap.has(item.name));
+    if (!allAligned) continue;
+
+    for (const actionDef of dt.actions) {
+      if (!domain.has(actionDef.name)) domain.set(actionDef.name, new Set());
+      for (const rule of dt.rules) {
+        const val = rule.actions.get(actionDef.name);
+        if (val !== undefined) domain.get(actionDef.name)!.add(val);
+      }
+    }
+  }
+
+  return domain.size > 0 ? domain : undefined;
 }
