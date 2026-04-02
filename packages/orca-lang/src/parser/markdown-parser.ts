@@ -391,6 +391,7 @@ interface StateEntry {
   invoke?: InvokeDef;
   _pendingOnError?: string;  // temp: on_error parsed before invoke
   ignoredEvents?: string[];
+  ignoredAll?: boolean;
   line: number;
 }
 
@@ -431,9 +432,14 @@ function parseStateBullet(entry: StateEntry, text: string): void {
       entry.timeout = { duration: rest.slice(0, arrowIdx).trim(), target: rest.slice(arrowIdx + 2).trim() };
     }
   } else if (text.startsWith('ignore:')) {
-    const names = text.slice(7).trim().split(',').map(e => e.trim()).filter(Boolean);
-    if (!entry.ignoredEvents) entry.ignoredEvents = [];
-    entry.ignoredEvents.push(...names);
+    const val = text.slice(7).trim();
+    if (val === '*') {
+      entry.ignoredAll = true;
+    } else {
+      const names = val.split(',').map(e => e.trim()).filter(Boolean);
+      if (!entry.ignoredEvents) entry.ignoredEvents = [];
+      entry.ignoredEvents.push(...names);
+    }
   } else if (text.startsWith('on_done:')) {
     let val = text.slice(8).trim();
     if (val.startsWith('->')) val = val.slice(2).trim();
@@ -630,6 +636,7 @@ function buildStatesAtLevel(
     if (entry.onDone) state.onDone = entry.onDone;
     if (entry.timeout) state.timeout = entry.timeout;
     if (entry.ignoredEvents?.length) state.ignoredEvents = entry.ignoredEvents;
+    if (entry.ignoredAll) state.ignoredAll = true;
     if (entry.invoke) state.invoke = entry.invoke;
 
     i++;
@@ -678,6 +685,7 @@ function buildParallelRegions(
         if (e.onDone) s.onDone = e.onDone;
         if (e.timeout) s.timeout = e.timeout;
         if (e.ignoredEvents?.length) s.ignoredEvents = e.ignoredEvents;
+        if (e.ignoredAll) s.ignoredAll = true;
         if (e.invoke) s.invoke = e.invoke;
         regionStates.push(s);
         i++;

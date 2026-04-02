@@ -7,8 +7,15 @@ import { checkProperties } from './verifier/properties.js';
 import { compileToXState } from './compiler/xstate.js';
 import { compileToMermaid } from './compiler/mermaid.js';
 import { MachineDef, StateDef, GuardExpression, Type } from './parser/ast.js';
-import { verifyDecisionTable, verifyDecisionTables } from './verifier/dt-verifier.js';
-import { compileDecisionTableToTypeScript, compileDecisionTableToJSON } from './compiler/dt-compiler.js';
+import { DecisionTableDef } from './parser/dt-ast.js';
+import { verifyDecisionTable, verifyDecisionTables, checkFileContextAlignment, checkDTMachineIntegration } from './verifier/dt-verifier.js';
+import {
+  compileDecisionTableToTypeScript,
+  compileDecisionTableToPython,
+  compileDecisionTableToGo,
+  compileDecisionTableToJSON,
+  toSnakeCase,
+} from './compiler/dt-compiler.js';
 import { loadConfig, resolveConfigOverrides } from './config/index.js';
 import { createProvider } from './llm/index.js';
 import type { LLMProvider } from './llm/index.js';
@@ -88,6 +95,7 @@ export interface GenerateActionsResult {
   machine: string;
   actions: ActionScaffold[];
   scaffolds: Record<string, string>;
+  decisionTableCode?: Record<string, string>;  // DT name → compiled evaluator code
   tests?: Record<string, string>;
 }
 
@@ -247,8 +255,13 @@ export async function verifySkill(input: SkillInput): Promise<VerifySkillResult>
   const label = resolveLabel(input);
 
   let machine: MachineDef;
+  let fileDecisionTables: import('./parser/dt-ast.js').DecisionTableDef[] = [];
   try {
-    machine = parseSource(label, source);
+    const { file } = parseMarkdown(source);
+    if (file.machines.length === 0) throw new Error(`${label} contains no machine definition.`);
+    if (file.machines.length > 1) throw new Error(`${label} contains multiple machines.`);
+    machine = file.machines[0];
+    fileDecisionTables = file.decisionTables;
   } catch (err) {
     // Parse error - return as verification error
     const message = err instanceof Error ? err.message : String(err);
@@ -272,13 +285,25 @@ export async function verifySkill(input: SkillInput): Promise<VerifySkillResult>
   const determinism = checkDeterminism(machine);
   const properties = checkProperties(machine);
 
-  const mapError = (e: { code: string; message: string; severity: 'error' | 'warning'; location?: { state?: string; event?: string }; suggestion?: string }): SkillError => ({
+  // Check co-located decision table alignment and machine integration (single-machine files only)
+  const orcaFile = { machines: [machine], decisionTables: fileDecisionTables };
+  const dtAlignment = fileDecisionTables.length > 0
+    ? checkFileContextAlignment(orcaFile)
+    : [];
+  const dtIntegration = fileDecisionTables.length > 0
+    ? checkDTMachineIntegration(orcaFile)
+    : [];
+
+  const mapError = (e: { code: string; message: string; severity: 'error' | 'warning'; location?: { state?: string; event?: string; decisionTable?: string; condition?: string; action?: string }; suggestion?: string }): SkillError => ({
     code: e.code,
     message: e.message,
     severity: e.severity,
     location: e.location ? {
       state: e.location.state,
       event: e.location.event,
+      decisionTable: e.location.decisionTable,
+      condition: e.location.condition,
+      action: e.location.action,
     } : undefined,
     suggestion: e.suggestion,
   });
@@ -288,6 +313,8 @@ export async function verifySkill(input: SkillInput): Promise<VerifySkillResult>
     ...completeness.errors.map(mapError),
     ...determinism.errors.map(mapError),
     ...properties.errors.map(mapError),
+    ...dtAlignment.map(mapError),
+    ...dtIntegration.map(mapError),
   ];
 
   return {
@@ -347,7 +374,18 @@ export async function generateActionsSkill(
   generateTests: boolean = false
 ): Promise<GenerateActionsResult> {
   const source = resolveSource(input);
-  const machine = parseSource(resolveLabel(input), source);
+
+  // Parse the full file to get both the machine and any co-located decision tables
+  const { file } = parseMarkdown(source);
+  const label = resolveLabel(input);
+  if (file.machines.length === 0) {
+    throw new Error(`${label} contains no machine definition.`);
+  }
+  if (file.machines.length > 1) {
+    throw new Error(`${label} contains multiple machines. Use a single-machine file for action generation.`);
+  }
+  const machine = file.machines[0];
+  const decisionTables = file.decisionTables;
 
   const actions: ActionScaffold[] = machine.actions.map(action => ({
     name: action.name,
@@ -358,6 +396,18 @@ export async function generateActionsSkill(
     effectType: action.effectType,
     context_used: extractContextFields(machine, action.name),
   }));
+
+  // Compile decision table evaluator code for each DT in the file
+  const decisionTableCode: Record<string, string> = {};
+  for (const dt of decisionTables) {
+    if (language === 'python') {
+      decisionTableCode[dt.name] = compileDecisionTableToPython(dt);
+    } else if (language === 'go') {
+      decisionTableCode[dt.name] = compileDecisionTableToGo(dt);
+    } else {
+      decisionTableCode[dt.name] = compileDecisionTableToTypeScript(dt);
+    }
+  }
 
   let scaffolds: Record<string, string> = {};
   let tests: Record<string, string> = {};
@@ -373,7 +423,7 @@ export async function generateActionsSkill(
       temperature: config.temperature,
     });
 
-    scaffolds = await generateWithLLM(provider, actions, machine, language as CodeGeneratorType);
+    scaffolds = await generateWithLLM(provider, actions, machine, language as CodeGeneratorType, decisionTables);
 
     if (generateTests) {
       tests = await generateUnitTests(provider, actions, machine, language as CodeGeneratorType);
@@ -381,7 +431,13 @@ export async function generateActionsSkill(
   } else {
     // Use template-based scaffold generation
     for (const action of machine.actions) {
-      scaffolds[action.name] = generateActionScaffold(action, machine, language);
+      const matchedDT = findMatchingDT(action.name, decisionTables);
+      if (matchedDT && !action.hasEffect && isDTFullyAligned(matchedDT, machine)) {
+        // All DT conditions and outputs exist in context — generate fully wired code
+        scaffolds[action.name] = generateFullyWiredActionScaffold(action, machine, language, matchedDT);
+      } else {
+        scaffolds[action.name] = generateActionScaffold(action, machine, language, matchedDT ?? undefined);
+      }
     }
 
     if (generateTests) {
@@ -394,6 +450,7 @@ export async function generateActionsSkill(
     machine: machine.name,
     actions,
     scaffolds,
+    decisionTableCode: Object.keys(decisionTableCode).length > 0 ? decisionTableCode : undefined,
     tests: Object.keys(tests).length > 0 ? tests : undefined,
   };
 }
@@ -402,22 +459,35 @@ async function generateWithLLM(
   provider: LLMProvider,
   actions: ActionScaffold[],
   machine: MachineDef,
-  language: CodeGeneratorType
+  language: CodeGeneratorType,
+  decisionTables: DecisionTableDef[] = []
 ): Promise<Record<string, string>> {
   const generator = getCodeGenerator(language);
   const scaffolds: Record<string, string> = {};
 
+  const dtContext = decisionTables.length > 0
+    ? `\nDecision tables available:\n${decisionTables.map(dt =>
+        `- ${dt.name}: conditions=[${dt.conditions.map(c => c.name).join(', ')}] outputs=[${dt.actions.map(a => a.name).join(', ')}]`
+      ).join('\n')}`
+    : '';
+
   const systemPrompt = `You are an expert ${language} developer specializing in state machine action implementations.
 Given a machine definition and action signatures, generate complete action implementations.
 Follow the type signatures exactly. Use the provided context fields.
-If an action has an effect, return [newContext, effect] tuple.`;
+If an action has an effect, return [newContext, effect] tuple.
+If decision tables are listed, use their evaluator functions (e.g. evaluate${language === 'go' ? 'DtName' : 'DtName'}) when appropriate.`;
 
   for (const action of actions) {
+    const matchedDT = findMatchingDT(action.name, decisionTables);
+    const dtHint = matchedDT
+      ? `\nThis action should use the ${matchedDT.name} decision table evaluator.`
+      : '';
+
     const userPrompt = `Machine: ${machine.name}
-Context fields: ${machine.context.map(f => `${f.name}: ${f.type || 'unknown'}`).join(', ')}
+Context fields: ${machine.context.map(f => `${f.name}: ${f.type || 'unknown'}`).join(', ')}${dtContext}
 
 Action: ${action.signature}
-Description: ${action.name}${action.hasEffect ? ` (effect type: ${action.effectType})` : ''}
+Description: ${action.name}${action.hasEffect ? ` (effect type: ${action.effectType})` : ''}${dtHint}
 
 Generate the implementation:`;
 
@@ -436,7 +506,7 @@ Generate the implementation:`;
     } catch (err) {
       console.error(`LLM error for action ${action.name}: ${err instanceof Error ? err.message : String(err)}`);
       // Fall back to scaffold on error
-      scaffolds[action.name] = generateActionScaffold(action, machine, language);
+      scaffolds[action.name] = generateActionScaffold(action, machine, language, matchedDT ?? undefined);
     }
   }
 
@@ -779,10 +849,222 @@ function toPascalCase(snake: string): string {
   return snake.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('');
 }
 
+/**
+ * Find a decision table whose name tokens overlap with the action name tokens.
+ * E.g. action "apply_routing_decision" matches DT "PaymentRouting" via "routing".
+ */
+function findMatchingDT(actionName: string, dts: DecisionTableDef[]): DecisionTableDef | null {
+  if (dts.length === 0) return null;
+  const actionTokens = new Set(
+    actionName.toLowerCase().split('_').filter(t => t.length > 2)
+  );
+  for (const dt of dts) {
+    const dtTokens = dt.name
+      .replace(/([A-Z])/g, ' $1')
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(t => t.length > 2);
+    if (dtTokens.some(t => actionTokens.has(t))) return dt;
+  }
+  return null;
+}
+
+/**
+ * Generate a commented example DT call block to include in an action stub.
+ */
+function generateDTCallComment(dt: DecisionTableDef, language: string): string {
+  const dtName = dt.name;
+
+  if (language === 'python') {
+    const fnName = `evaluate_${toSnakeCase(dtName)}`;
+    const inputClass = `${toPascalCase(dtName)}Input`;
+    const inputArgs = dt.conditions.map(c => {
+      const hint = c.type === 'enum' && c.values.length > 0
+        ? `str (${c.values.join(', ')})`
+        : c.type === 'bool' ? 'bool' : 'str';
+      return `    #     ${c.name}=...,  # ${hint} — map from ctx`;
+    }).join('\n');
+    const outputFields = dt.actions.map(a =>
+      `    #     # dt_result.${a.name} → ctx['${a.name}']`
+    ).join('\n');
+    return [
+      `    # Call ${fnName} to evaluate ${dtName} rules:`,
+      `    # dt_result = ${fnName}(${inputClass}(`,
+      inputArgs,
+      `    # ))`,
+      `    # if dt_result is not None:`,
+      outputFields,
+    ].join('\n');
+  }
+
+  if (language === 'go') {
+    const fnName = `Evaluate${toPascalCase(dtName)}`;
+    const inputStruct = `${toPascalCase(dtName)}Input`;
+    const inputArgs = dt.conditions.map(c => {
+      const goField = toPascalCase(c.name);
+      const hint = c.type === 'enum' && c.values.length > 0
+        ? `string (${c.values.join(', ')})`
+        : c.type === 'bool' ? 'bool' : 'string';
+      return `\t// \t${goField}: ..., // ${hint} — map from ctx`;
+    }).join('\n');
+    const outputFields = dt.actions.map(a =>
+      `\t// \tresult["${a.name}"] = dtResult.${toPascalCase(a.name)}`
+    ).join('\n');
+    return [
+      `\t// Call ${fnName} to evaluate ${dtName} rules:`,
+      `\t// dtResult := ${fnName}(${inputStruct}{`,
+      inputArgs,
+      `\t// })`,
+      `\t// if dtResult != nil {`,
+      outputFields,
+      `\t// }`,
+    ].join('\n');
+  }
+
+  // TypeScript (default)
+  const fnName = `evaluate${toPascalCase(dtName)}`;
+  const inputType = `${toPascalCase(dtName)}Input`;
+  const inputArgs = dt.conditions.map(c => {
+    const hint = c.type === 'enum' && c.values.length > 0
+      ? `enum: ${c.values.join(', ')}`
+      : c.type;
+    return `  //   ${c.name}: /* ctx.? */ as ${inputType}['${c.name}'],  // ${hint} — map from ctx`;
+  }).join('\n');
+  const outputFields = dt.actions.map(a =>
+    `  //   ${a.name}: dtResult.${a.name},`
+  ).join('\n');
+  return [
+    `  // Call ${fnName} to evaluate ${dtName} rules:`,
+    `  // const dtResult = ${fnName}({`,
+    inputArgs,
+    `  // });`,
+    `  // if (dtResult !== null) {`,
+    `  //   return { ...ctx,`,
+    outputFields,
+    `  //   };`,
+    `  // }`,
+  ].join('\n');
+}
+
+/**
+ * Returns true when every DT condition name and output name exists as a
+ * context field in the machine — the full co-location contract is satisfied.
+ */
+function isDTFullyAligned(dt: DecisionTableDef, machine: MachineDef): boolean {
+  const contextNames = new Set(machine.context.map(f => f.name));
+  return dt.conditions.every(c => contextNames.has(c.name)) &&
+         dt.actions.every(a => contextNames.has(a.name));
+}
+
+/** Generate a Go type assertion for reading a context value. */
+function goCtxRead(fieldName: string, condType: string): string {
+  if (condType === 'bool') return `ctx["${fieldName}"].(bool)`;
+  if (condType === 'int_range') return `ctx["${fieldName}"].(int)`;
+  return `ctx["${fieldName}"].(string)`;
+}
+
+function generateFullyWiredActionScaffold(
+  action: { name: string; parameters: string[]; returnType: string; hasEffect: boolean; effectType?: string },
+  machine: MachineDef,
+  language: string,
+  dt: DecisionTableDef
+): string {
+  if (language === 'python') {
+    const dtFnName = `evaluate_${toSnakeCase(dt.name)}`;
+    const inputClass = `${toPascalCase(dt.name)}Input`;
+    const inputArgs = dt.conditions
+      .map(c => `        ${c.name}=ctx['${c.name}'],`)
+      .join('\n');
+    const outputAssigns = dt.actions
+      .map(a => `            '${a.name}': dt_result.${a.name},`)
+      .join('\n');
+    return `# Action: ${action.name}
+# Decision table: ${dt.name}
+# Register via: machine.register_action("${action.name}", ${action.name})
+
+from typing import Any
+
+async def ${action.name}(ctx: dict[str, Any], event: Any = None) -> dict[str, Any]:
+    dt_result = ${dtFnName}(${inputClass}(
+${inputArgs}
+    ))
+    if dt_result is not None:
+        return {**ctx,
+${outputAssigns}
+        }
+    return dict(ctx)
+`;
+  }
+
+  if (language === 'go') {
+    const fnName = toPascalCase(action.name);
+    const dtFnName = `Evaluate${toPascalCase(dt.name)}`;
+    const inputStruct = `${toPascalCase(dt.name)}Input`;
+    const ctxReads = dt.conditions.map(c => {
+      const varName = toPascalCase(c.name).charAt(0).toLowerCase() + toPascalCase(c.name).slice(1);
+      return `\t${varName}, _ := ${goCtxRead(c.name, c.type)}`;
+    }).join('\n');
+    const inputFields = dt.conditions.map(c => {
+      const goField = toPascalCase(c.name);
+      const varName = goField.charAt(0).toLowerCase() + goField.slice(1);
+      return `\t\t${goField}: ${varName},`;
+    }).join('\n');
+    const outputAssigns = dt.actions
+      .map(a => `\t\tresult["${a.name}"] = dtResult.${toPascalCase(a.name)}`)
+      .join('\n');
+    return `// Action: ${action.name}
+// Decision table: ${dt.name}
+// Register via: machine.RegisterAction("${action.name}", ${fnName})
+
+func ${fnName}(ctx orca.Context, event map[string]any) map[string]any {
+${ctxReads}
+\tdtResult := ${dtFnName}(${inputStruct}{
+${inputFields}
+\t})
+\tresult := make(orca.Context)
+\tfor k, v := range ctx {
+\t\tresult[k] = v
+\t}
+\tif dtResult != nil {
+${outputAssigns}
+\t}
+\treturn result
+}
+`;
+  }
+
+  // TypeScript (default)
+  const dtFnName = `evaluate${toPascalCase(dt.name)}`;
+  const inputArgs = dt.conditions
+    .map(c => `    ${c.name}: ctx.${c.name},`)
+    .join('\n');
+  const outputAssigns = dt.actions
+    .map(a => `      ${a.name}: dtResult.${a.name},`)
+    .join('\n');
+  return `// Action: ${action.name}
+// Decision table: ${dt.name}
+
+export function ${action.name}(ctx: Context): Context {
+  const dtResult = ${dtFnName}({
+${inputArgs}
+  });
+  if (dtResult !== null) {
+    return {
+      ...ctx,
+${outputAssigns}
+    };
+  }
+  return { ...ctx };
+}
+`;
+}
+
 function generateActionScaffold(
   action: { name: string; parameters: string[]; returnType: string; hasEffect: boolean; effectType?: string },
   machine: MachineDef,
-  language: string
+  language: string,
+  matchedDT?: DecisionTableDef
 ): string {
   if (language === 'python') {
     if (action.hasEffect) {
@@ -800,13 +1082,17 @@ async def ${action.name}(effect: Effect) -> EffectResult:
     return EffectResult(status=EffectStatus.SUCCESS, data={})
 `;
     }
-    return `# Action: ${action.name}
+    const pyDTComment = matchedDT ? '\n' + generateDTCallComment(matchedDT, 'python') + '\n' : '';
+    const pyTodo = matchedDT
+      ? `    # TODO: Implement action using ${matchedDT.name} decision table`
+      : '    # TODO: Implement action';
+    return `# Action: ${action.name}${matchedDT ? `\n# Decision table: ${matchedDT.name}` : ''}
 # Register via: machine.register_action("${action.name}", ${action.name})
 
 from typing import Any
 
-async def ${action.name}(ctx: dict[str, Any], event: Any = None) -> dict[str, Any]:
-    # TODO: Implement action
+async def ${action.name}(ctx: dict[str, Any], event: Any = None) -> dict[str, Any]:${pyDTComment}
+${pyTodo}
     return dict(ctx)
 `;
   }
@@ -827,11 +1113,15 @@ func ${fnName}(effect orca.Effect) orca.EffectResult {
 }
 `;
     }
-    return `// Action: ${action.name}
+    const goDTComment = matchedDT ? '\n' + generateDTCallComment(matchedDT, 'go') + '\n' : '';
+    const goTodo = matchedDT
+      ? `\t// TODO: Implement action using ${matchedDT.name} decision table`
+      : '\t// TODO: Implement action';
+    return `// Action: ${action.name}${matchedDT ? `\n// Decision table: ${matchedDT.name}` : ''}
 // Register via: machine.RegisterAction("${action.name}", ${fnName})
 
-func ${fnName}(ctx orca.Context, event map[string]any) map[string]any {
-\t// TODO: Implement action
+func ${fnName}(ctx orca.Context, event map[string]any) map[string]any {${goDTComment}
+${goTodo}
 \tresult := make(orca.Context)
 \tfor k, v := range ctx {
 \t\tresult[k] = v
@@ -863,10 +1153,15 @@ export function ${action.name}(${params}): [Context, Effect<${action.effectType}
 // }
 `;
   }
-  return `// Action: ${action.name}
 
-export function ${action.name}(ctx: Context): Context {
-  // TODO: Implement action
+  const tsDTComment = matchedDT ? '\n' + generateDTCallComment(matchedDT, 'typescript') + '\n' : '';
+  const tsTodo = matchedDT
+    ? `  // TODO: Implement action using ${matchedDT.name} decision table`
+    : '  // TODO: Implement action';
+  return `// Action: ${action.name}${matchedDT ? `\n// Decision table: ${matchedDT.name}` : ''}
+
+export function ${action.name}(ctx: Context): Context {${tsDTComment}
+${tsTodo}
   return { ...ctx };
 }
 `;

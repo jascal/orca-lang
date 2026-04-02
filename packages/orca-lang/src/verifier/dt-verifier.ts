@@ -1,7 +1,9 @@
 // Decision Table Verifier
-// Checks: completeness, consistency, redundancy, and structural integrity
+// Checks: completeness, consistency, redundancy, structural integrity, co-location alignment,
+// and machine integration (coverage gap + dead guard detection).
 
 import { DecisionTableDef, ConditionDef, CellValue, Rule } from '../parser/dt-ast.js';
+import { MachineDef, OrcaFile, ContextField, GuardExpression, ComparisonOp } from '../parser/ast.js';
 import { VerificationError, VerificationResult, Severity } from './types.js';
 
 // Helper to get all values for a condition
@@ -559,4 +561,247 @@ export function verifyDecisionTables(dts: DecisionTableDef[]): VerificationResul
     valid: !allErrors.some(e => e.severity === 'error'),
     errors: allErrors,
   };
+}
+
+// ============================================================
+// Co-location Alignment Check
+// ============================================================
+
+/**
+ * Check that every condition name and output name in a co-located decision table
+ * exists as a context field in the machine. When a DT and machine are in the same
+ * file, this contract allows action generation to produce fully-wired code.
+ */
+export function checkDTContextAlignment(
+  dt: DecisionTableDef,
+  machine: MachineDef
+): VerificationError[] {
+  const errors: VerificationError[] = [];
+  const contextNames = new Set(machine.context.map(f => f.name));
+
+  for (const cond of dt.conditions) {
+    if (!contextNames.has(cond.name)) {
+      errors.push({
+        code: 'DT_CONTEXT_MISMATCH',
+        message: `Decision table '${dt.name}' condition '${cond.name}' has no matching context field in machine '${machine.name}'`,
+        severity: 'error',
+        location: { decisionTable: dt.name, condition: cond.name },
+        suggestion: `Add '${cond.name}' to the ## context section, or rename the condition to match an existing context field`,
+      });
+    }
+  }
+
+  for (const action of dt.actions) {
+    if (!contextNames.has(action.name)) {
+      errors.push({
+        code: 'DT_CONTEXT_MISMATCH',
+        message: `Decision table '${dt.name}' output '${action.name}' has no matching context field in machine '${machine.name}'`,
+        severity: 'error',
+        location: { decisionTable: dt.name, action: action.name },
+        suggestion: `Add '${action.name}' to the ## context section, or rename the output to match an existing context field`,
+      });
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * For a file with exactly one machine and one or more decision tables, verify
+ * that every DT condition and output name matches a machine context field.
+ * Multi-machine files are skipped (ambiguous ownership).
+ */
+export function checkFileContextAlignment(file: OrcaFile): VerificationError[] {
+  if (file.machines.length !== 1 || file.decisionTables.length === 0) {
+    return [];
+  }
+  const machine = file.machines[0];
+  const errors: VerificationError[] = [];
+  for (const dt of file.decisionTables) {
+    errors.push(...checkDTContextAlignment(dt, machine));
+  }
+  return errors;
+}
+
+// ============================================================
+// Machine Integration Checks
+// ============================================================
+
+/**
+ * Get the enumerable values for a machine context field.
+ * Returns null for types that cannot be exhaustively enumerated (string, int, decimal).
+ * For enum fields, values are stored as a comma-separated defaultValue string.
+ */
+function getMachineFieldValues(field: ContextField): string[] | null {
+  if (field.type.kind === 'bool') return ['true', 'false'];
+  if (field.type.kind === 'custom' && field.type.name === 'enum') {
+    if (!field.defaultValue) return null;
+    const vals = field.defaultValue.split(',').map(v => v.trim()).filter(Boolean);
+    return vals.length > 0 ? vals : null;
+  }
+  return null;
+}
+
+/**
+ * Generate all combinations of condition values using machine context values as the
+ * input domain. Returns null if any condition cannot be enumerated or if the
+ * total combinations exceed the safety limit.
+ */
+function generateMachineContextCombinations(
+  dt: DecisionTableDef,
+  contextMap: Map<string, ContextField>
+): Map<string, string>[] | null {
+  const domainPerCondition: string[][] = [];
+
+  for (const cond of dt.conditions) {
+    const field = contextMap.get(cond.name);
+    if (!field) return null; // Alignment not met — caller should have checked
+    const vals = getMachineFieldValues(field);
+    if (!vals) return null; // Non-enumerable type
+    domainPerCondition.push(vals);
+  }
+
+  // Safety limit
+  let total = 1;
+  for (const vals of domainPerCondition) total *= vals.length;
+  if (total > 4096) return null;
+
+  // Cartesian product
+  const combos: Map<string, string>[] = [];
+  function cartesian(idx: number, current: Map<string, string>): void {
+    if (idx === dt.conditions.length) {
+      combos.push(new Map(current));
+      return;
+    }
+    const condName = dt.conditions[idx].name;
+    for (const val of domainPerCondition[idx]) {
+      current.set(condName, val);
+      cartesian(idx + 1, current);
+      current.delete(condName);
+    }
+  }
+  cartesian(0, new Map());
+  return combos;
+}
+
+/**
+ * DT_COVERAGE_GAP: Decision table must cover all input combinations the machine
+ * context can actually produce. Uses machine enum/bool values as the authoritative
+ * domain — stricter than DT_INCOMPLETE which only checks DT-declared values.
+ */
+function checkDTCoverageGap(
+  dt: DecisionTableDef,
+  contextMap: Map<string, ContextField>
+): VerificationError[] {
+  const errors: VerificationError[] = [];
+
+  const combos = generateMachineContextCombinations(dt, contextMap);
+  if (!combos) return errors; // Non-enumerable conditions or too many combinations
+
+  for (const combo of combos) {
+    const matched = dt.rules.some(rule => ruleMatchesInput(rule, dt.conditions, combo));
+    if (!matched) {
+      const comboDesc = [...combo.entries()].map(([k, v]) => `${k}=${v}`).join(', ');
+      errors.push({
+        code: 'DT_COVERAGE_GAP',
+        message: `Decision table '${dt.name}' has no rule for machine context combination: ${comboDesc}`,
+        severity: 'error',
+        location: { decisionTable: dt.name },
+        suggestion: `Add a rule covering this combination, or add a catch-all row using '-' wildcards`,
+      });
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Recursively collect all equality comparisons from a guard expression.
+ * Returns tuples of (fieldName, op, comparedValue) for any `ctx.X op Y` node.
+ */
+function collectFieldComparisons(
+  expr: GuardExpression
+): Array<{ field: string; op: ComparisonOp; value: string }> {
+  if (expr.kind === 'compare') {
+    // Only handle ctx.fieldName comparisons
+    if (expr.left.path.length === 2 && expr.left.path[0] === 'ctx') {
+      return [{ field: expr.left.path[1], op: expr.op, value: String(expr.right.value) }];
+    }
+    return [];
+  }
+  if (expr.kind === 'not') return collectFieldComparisons(expr.expr);
+  if (expr.kind === 'and' || expr.kind === 'or') {
+    return [...collectFieldComparisons(expr.left), ...collectFieldComparisons(expr.right)];
+  }
+  return [];
+}
+
+/**
+ * DT_GUARD_DEAD: A guard that compares a DT output field against a value the DT
+ * never produces is a dead guard — it can never be true immediately after the
+ * DT action fires. Reported as a warning since another action might set the field.
+ */
+function checkDTGuardDead(dt: DecisionTableDef, machine: MachineDef): VerificationError[] {
+  const errors: VerificationError[] = [];
+
+  // Build output domain: field → set of values the DT can produce
+  const outputDomain = new Map<string, Set<string>>();
+  for (const action of dt.actions) {
+    outputDomain.set(action.name, new Set<string>());
+  }
+  for (const rule of dt.rules) {
+    for (const [name, value] of rule.actions) {
+      outputDomain.get(name)?.add(value);
+    }
+  }
+
+  const outputFields = new Set(dt.actions.map(a => a.name));
+
+  for (const guardDef of machine.guards) {
+    const comparisons = collectFieldComparisons(guardDef.expression);
+    for (const { field, op, value } of comparisons) {
+      if (!outputFields.has(field)) continue; // Not a DT output field
+      if (op !== 'eq') continue;              // Only equality checks are conclusive
+
+      const possible = outputDomain.get(field)!;
+      if (!possible.has(value)) {
+        const possibleList = [...possible].join(', ') || '(none)';
+        errors.push({
+          code: 'DT_GUARD_DEAD',
+          message: `Guard '${guardDef.name}' tests '${field} == ${value}' but '${dt.name}' never outputs '${value}' for '${field}' (possible: ${possibleList})`,
+          severity: 'warning',
+          location: { decisionTable: dt.name, condition: field },
+          suggestion: `Update '${dt.name}' to produce '${value}' for '${field}', or remove this guard`,
+        });
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Check DT integration with the machine: coverage gap (DT must handle all machine
+ * context inputs) and dead guards (guards on DT output fields must be satisfiable).
+ * Only runs when exactly one machine is present and the DT is fully aligned.
+ * Multi-machine files are skipped (ambiguous ownership).
+ */
+export function checkDTMachineIntegration(file: OrcaFile): VerificationError[] {
+  if (file.machines.length !== 1 || file.decisionTables.length === 0) {
+    return [];
+  }
+  const machine = file.machines[0];
+  const contextMap = new Map(machine.context.map(f => [f.name, f]));
+  const errors: VerificationError[] = [];
+
+  for (const dt of file.decisionTables) {
+    // Only verify DTs that are fully aligned with machine context
+    const allAligned = [...dt.conditions, ...dt.actions].every(item => contextMap.has(item.name));
+    if (!allAligned) continue;
+
+    errors.push(...checkDTCoverageGap(dt, contextMap));
+    errors.push(...checkDTGuardDead(dt, machine));
+  }
+
+  return errors;
 }

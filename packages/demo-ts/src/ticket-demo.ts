@@ -31,6 +31,8 @@ interface TicketContext {
   team: string;
   assigned_agent: string;
   estimated_wait: number;
+  tier1_avail: boolean;
+  tier2_avail: boolean;
 }
 
 // Action handlers for the ticket workflow
@@ -66,18 +68,18 @@ function createTicketHandlers() {
       console.log(`  Category: ${ticketCtx.category}`);
       console.log(`  Priority: ${ticketCtx.priority}`);
 
-      // Simulate availability check
-      const tier1Available = Math.random() > 0.3; // 70% chance available
-      const tier2Available = Math.random() > 0.2; // 80% chance available
+      // Simulate availability check — set on context for DT evaluation
+      ticketCtx.tier1_avail = Math.random() > 0.3; // 70% chance available
+      ticketCtx.tier2_avail = Math.random() > 0.2; // 80% chance available
 
-      console.log(`  Tier1 available: ${tier1Available}`);
-      console.log(`  Tier2 available: ${tier2Available}`);
+      console.log(`  Tier1 available: ${ticketCtx.tier1_avail}`);
+      console.log(`  Tier2 available: ${ticketCtx.tier2_avail}`);
 
       const decision = evaluateTicketRouting(
         ticketCtx.category,
         ticketCtx.priority,
-        tier1Available,
-        tier2Available
+        ticketCtx.tier1_avail,
+        ticketCtx.tier2_avail
       );
 
       ticketCtx.team = decision.team;
@@ -148,6 +150,8 @@ async function runTicketDemo() {
     team: '',
     assigned_agent: '',
     estimated_wait: 0,
+    tier1_avail: false,
+    tier2_avail: false,
   };
 
   // Create the machine with initial context

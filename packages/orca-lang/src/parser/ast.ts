@@ -120,6 +120,7 @@ export interface StateDef {
   parent?: string;  // Parent state name for hierarchical states
   transitions?: Transition[];
   ignoredEvents?: string[];
+  ignoredAll?: boolean;     // true when "- ignore: *" — all unhandled events discarded
 }
 
 export interface Transition {

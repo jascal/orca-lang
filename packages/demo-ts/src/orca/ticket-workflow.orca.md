@@ -19,13 +19,14 @@
 | team | string | "" |
 | assigned_agent | string | "" |
 | estimated_wait | number | 0 |
+| tier1_avail | bool | false |
+| tier2_avail | bool | false |
 
 ## events
 
 - TICKET_RECEIVED
 - TRIAGED
 - ROUTED
-- ASSIGNED
 - RESOLVED
 - CLOSED
 - ESCALATED
@@ -40,28 +41,26 @@
 | assign_ticket | `(ctx) -> Context` |
 
 ## state new [initial] "Ticket received, awaiting triage"
-> on TICKET_RECEIVED -> triaged
+- ignore: *
 
 ## state triaged "Ticket triaged, routing to team"
-> on TRIAGED -> routed
-> on REJECTED -> rejected
+- ignore: *
 
 ## state routed "Ticket routed to team/agent"
-> on ROUTED -> handling
-> on ESCALATED -> escalated
+- ignore: *
 
 ## state handling "Agent working on ticket"
-> on RESOLVED -> resolved
+- ignore: *
 
 ## state resolved "Ticket resolved, awaiting closure"
-> on CLOSED -> closed
+- ignore: *
+
+## state escalated "Ticket escalated to higher tier"
+- ignore: *
 
 ## state closed [final] "Ticket closed"
 
 ## state rejected [final] "Ticket rejected"
-
-## state escalated "Ticket escalated to higher tier"
-> on ROUTED -> handling
 
 ## transitions
 
@@ -73,13 +72,32 @@
 | routed | ROUTED | | handling | assign_ticket |
 | routed | ESCALATED | | escalated | |
 | handling | RESOLVED | | resolved | |
+| handling | ESCALATED | | escalated | |
 | resolved | CLOSED | | closed | |
+| escalated | ROUTED | | handling | assign_ticket |
 
 ---
 
-## TicketTriaging Decision Table
+# decision_table TicketTriaging
 
-The `triage_ticket` action evaluates these rules to determine priority, category, and SLA:
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| issue_type | enum | billing, technical, account, general |
+| customer_tier | enum | vip, premium, standard |
+| sentiment | enum | negative, neutral, positive |
+| message_size | enum | long, short |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| priority | enum | critical, high, medium, low |
+| category | enum | billing, technical, account, general |
+| sla | enum | 1h, 4h, 24h, 72h |
+
+## rules
 
 | issue_type | customer_tier | sentiment | message_size | → priority | → category | → sla |
 |------------|---------------|-----------|--------------|------------|------------|-------|
@@ -98,22 +116,39 @@ The `triage_ticket` action evaluates these rules to determine priority, category
 
 ---
 
-## TicketRouting Decision Table
+# decision_table TicketRouting
 
-The `route_ticket` action evaluates these rules to determine team, agent, and estimated wait:
+## conditions
 
-| category | priority | tier1_avail | tier2_avail | → team | → agent | → estimated_wait |
-|-----------|----------|-------------|-------------|--------|---------|-------------------|
+| Name | Type | Values |
+|------|------|--------|
+| category | enum | billing, account, technical, general |
+| priority | enum | critical, high, medium, low |
+| tier1_avail | bool | |
+| tier2_avail | bool | |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| team | enum | tier3, tier2, tier1, billing_team, account_team |
+| assigned_agent | string | |
+| estimated_wait | string | |
+
+## rules
+
+| category | priority | tier1_avail | tier2_avail | → team | → assigned_agent | → estimated_wait |
+|----------|----------|-------------|-------------|--------|------------------|-----------------|
 | - | critical | - | - | tier3 | agent-escalation-1 | 5 |
 | billing | - | - | - | billing_team | billing-agent-1 | 10 |
 | account | - | - | - | account_team | account-agent-1 | 15 |
-| technical | high | yes | yes | tier2 | tier2-agent-2 | 20 |
+| technical | high | false | true | tier2 | tier2-agent-2 | 20 |
 | technical | high | - | - | tier3 | tier3-agent-1 | 30 |
-| technical | medium | yes | - | tier1 | tier1-agent-1 | 45 |
-| technical | medium | - | yes | tier2 | tier2-agent-1 | 30 |
+| technical | medium | true | - | tier1 | tier1-agent-1 | 45 |
+| technical | medium | false | true | tier2 | tier2-agent-1 | 30 |
 | technical | medium | - | - | tier3 | tier3-agent-2 | 60 |
-| technical | low | yes | - | tier1 | tier1-agent-2 | 120 |
+| technical | low | true | - | tier1 | tier1-agent-2 | 120 |
 | technical | low | - | - | tier2 | tier2-agent-3 | 180 |
 | general | high | - | - | tier2 | tier2-agent-4 | 30 |
-| general | - | yes | - | tier1 | tier1-agent-3 | 60 |
+| general | - | true | - | tier1 | tier1-agent-3 | 60 |
 | general | - | - | - | tier1 | tier1-agent-4 | 240 |

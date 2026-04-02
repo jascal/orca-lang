@@ -4,11 +4,12 @@
 
 | Field | Type | Default |
 |-------|------|---------|
-| amount | int | 0 |
-| customer_tier | enum | new, returning, vip |
-| fraud_score | int | 0 |
+| amount_tier | enum | low, medium, high |
+| customer_type | enum | new, returning, vip |
+| has_fraud_flag | bool | false |
 | gateway | enum | stripe, adyen, manual_review |
-| approved | bool | false |
+| requires_approval | bool | false |
+| risk_level | enum | low, medium, high |
 
 ## events
 
@@ -18,12 +19,13 @@
 - route_decision
 
 ## state idle [initial]
+- ignore: *
 
 ## state routing
-> Route payment to appropriate gateway based on decision table
+- ignore: *
 
 ## state processing
-> Payment is being processed by selected gateway
+- ignore: *
 
 ## state approved [final]
 > Payment was approved
@@ -40,12 +42,13 @@
 | processing | payment_approved | | approved | mark_approved |
 | processing | payment_declined | | declined | mark_declined |
 
+
 ## guards
 
 | Name | Expression |
 |------|------------|
-| is_high_risk | `ctx.fraud_score > 80` |
-| is_vip | `ctx.customer_tier == 'vip'` |
+| is_high_risk | `ctx.has_fraud_flag == true` |
+| is_vip | `ctx.customer_type == 'vip'` |
 
 ## actions
 
