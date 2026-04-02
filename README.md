@@ -128,7 +128,6 @@ packages/
   demo-go/         Ride-hailing coordinator — 5 machines (uses runtime-go)
   demo-nanolab/    nanoGPT training orchestrator — 5 machines (uses runtime-python)
   mcp-server/      MCP server exposing Orca tools to Claude and other agents
-  workflow-ts/     [experimental] AI agent that implements phase doc steps automatically
 ```
 
 ---
@@ -525,27 +524,6 @@ Create `.mcp.json` at the project root (it is already in `.gitignore`), then res
 > }
 > ```
 > Run `dirname $(which npx)` to find the correct path. On nvm it will be something like `~/.nvm/versions/node/v22.x.x/bin`.
-
----
-
-## workflow-ts (experimental)
-
-`packages/workflow-ts` is an AI agent that reads a phase document from `docs/` and implements its numbered steps automatically — writing files, running shell commands, and committing via GitHub. It uses `@orcalang/orca-runtime-ts` as its runtime (dogfooding).
-
-```bash
-cd packages/workflow-ts
-
-# Implement all steps in a phase doc
-npx tsx src/index.ts --phase ../../docs/phase-5-agent-adoption.md
-
-# Implement a single step
-npx tsx src/index.ts --phase ../../docs/phase-5-agent-adoption.md --step 5.1
-
-# Preview without writing files
-npx tsx src/index.ts --phase ../../docs/phase-5-agent-adoption.md --dry-run
-```
-
-Requires `ANTHROPIC_API_KEY`. The effect handlers cover LLM calls, filesystem writes, shell execution, and GitHub operations.
 
 ---
 
