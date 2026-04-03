@@ -72,14 +72,14 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'generate_actions',
     description:
-      'Generate action scaffold code from verified machine. lang: typescript (default), python, or go. Pass verified .orca.md source. use_llm: true for implementations vs templates. generate_tests: true for test scaffolds.',
+      'Generate action scaffold code from verified machine. lang: typescript (default), python, go, or rust. Pass verified .orca.md source. use_llm: true for implementations vs templates. generate_tests: true for test scaffolds.',
     inputSchema: {
       type: 'object',
       properties: {
         source: { type: 'string', description: 'Raw .orca.md content of a valid machine. Actions in the "## actions" table (| Name | Signature |) will have stubs generated.' },
         lang: {
           type: 'string',
-          enum: ['typescript', 'python', 'go'],
+          enum: ['typescript', 'python', 'go', 'rust'],
           description: 'Target language (default: typescript)',
         },
         use_llm: {
@@ -170,14 +170,14 @@ export const ORCA_TOOLS: ToolDef[] = [
   {
     name: 'compile_decision_table',
     description:
-      'Compile verified decision table to TypeScript evaluator function or portable JSON. Run verify_decision_table first. target: "typescript" (default) or "json".',
+      'Compile verified decision table to TypeScript, Python, Go, or Rust evaluator function, or portable JSON. Run verify_decision_table first.',
     inputSchema: {
       type: 'object',
       properties: {
         source: { type: 'string', description: 'Raw .orca.md content containing a # decision_table heading.' },
         target: {
           type: 'string',
-          enum: ['typescript', 'json'],
+          enum: ['typescript', 'python', 'go', 'rust', 'json'],
           description: 'Compilation target (default: typescript)',
         },
       },

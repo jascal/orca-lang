@@ -13,6 +13,7 @@ import {
   compileDecisionTableToTypeScript,
   compileDecisionTableToPython,
   compileDecisionTableToGo,
+  compileDecisionTableToRust,
   compileDecisionTableToJSON,
   toSnakeCase,
 } from './compiler/dt-compiler.js';
@@ -405,6 +406,8 @@ export async function generateActionsSkill(
       decisionTableCode[dt.name] = compileDecisionTableToPython(dt);
     } else if (language === 'go') {
       decisionTableCode[dt.name] = compileDecisionTableToGo(dt);
+    } else if (language === 'rust') {
+      decisionTableCode[dt.name] = compileDecisionTableToRust(dt);
     } else {
       decisionTableCode[dt.name] = compileDecisionTableToTypeScript(dt);
     }
@@ -577,6 +580,9 @@ function generateTemplateTestsForAction(action: ActionScaffold, machine: Machine
   }
   if (language === 'go') {
     return generateGoTestScaffold(action, machine);
+  }
+  if (language === 'rust') {
+    return generateRustTestScaffold(action, machine);
   }
   return generateTypeScriptTestScaffold(action, machine);
 }
@@ -762,6 +768,63 @@ ${preserved.map(f => `\tif result["${f}"] != ctx["${f}"] {\n\t\tt.Errorf("${f}: 
 `;
 }
 
+function generateRustTestScaffold(action: ActionScaffold, machine: MachineDef): string {
+  const ctxFields = machine.context.map(f => {
+    return `        "${f.name}": ${getDefaultValueForType(f.type, 'rust')}`;
+  }).join(',\n');
+  const contextUsed = action.context_used.length > 0 ? action.context_used : machine.context.map(f => f.name);
+  const preserved = contextUsed.filter(f => !actionModifiesField(action, f));
+
+  if (action.hasEffect) {
+    return `// Tests for ${action.name}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_${action.name}_executes_effect() {
+        let ctx = json!({
+${ctxFields}
+        });
+        let event = json!({"type": "test"});
+        let (result, effect) = ${action.name}(&ctx, &event);
+        assert!(result.is_object());
+        assert_eq!(effect.effect_type, "${action.effectType}");
+    }
+}
+`;
+  }
+
+  return `// Tests for ${action.name}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_${action.name}_transforms_context() {
+        let ctx = json!({
+${ctxFields}
+        });
+        let event = json!({"type": "test"});
+        let result = ${action.name}(&ctx, &event);
+        assert!(result.is_object());
+    }
+
+    #[test]
+    fn test_${action.name}_preserves_fields() {
+        let ctx = json!({
+${ctxFields}
+        });
+        let event = json!({"type": "test"});
+        let result = ${action.name}(&ctx, &event);
+${preserved.map(f => `        assert_eq!(result["${f}"], ctx["${f}"]);`).join('\n')}
+    }
+}
+`;
+}
+
 function actionModifiesField(action: ActionScaffold, fieldName: string): boolean {
   // Heuristic: if the action name suggests modification of a field, it likely modifies it
   const modifiers = ['increment', 'decrement', 'set', 'update', 'add', 'remove', 'clear', 'reset', 'toggle'];
@@ -783,7 +846,7 @@ function actionModifiesField(action: ActionScaffold, fieldName: string): boolean
 
 function getDefaultValueForType(type: any, language: string = 'typescript'): string {
   if (!type) {
-    return language === 'python' ? '""' : language === 'go' ? '""' : "''";
+    return language === 'python' ? '""' : language === 'go' ? '""' : language === 'rust' ? '"".to_string()' : "''";
   }
   if (typeof type === 'object' && 'kind' in type) {
     if (language === 'python') {
@@ -808,6 +871,22 @@ function getDefaultValueForType(type: any, language: string = 'typescript'): str
         case 'map': return 'nil';
         case 'custom': return 'nil';
       }
+    } else if (language === 'rust') {
+      switch (type.kind) {
+        case 'string': return '"".to_string()';
+        case 'int': return '0';
+        case 'decimal': return '0.0';
+        case 'bool': return 'false';
+        case 'optional': return 'null';
+        case 'array': return 'vec![]';
+        case 'map': return 'HashMap::new()';
+        case 'custom': {
+          // Handle common type aliases
+          if (type.name === 'float' || type.name === 'double') return '0.0';
+          if (type.name === 'integer' || type.name === 'long') return '0';
+          return 'null';
+        }
+      }
     } else {
       switch (type.kind) {
         case 'string': return "''";
@@ -821,7 +900,7 @@ function getDefaultValueForType(type: any, language: string = 'typescript'): str
       }
     }
   }
-  return language === 'python' ? 'None' : language === 'go' ? 'nil' : 'null';
+  return language === 'python' ? 'None' : language === 'go' ? 'nil' : language === 'rust' ? 'null' : 'null';
 }
 
 function extractContextFields(machine: MachineDef, actionName: string): string[] {
@@ -923,6 +1002,29 @@ function generateDTCallComment(dt: DecisionTableDef, language: string): string {
     ].join('\n');
   }
 
+  if (language === 'rust') {
+    const fnName = `evaluate_${toSnakeCase(dtName)}`;
+    const inputStruct = `${toPascalCase(dtName)}Input`;
+    const inputArgs = dt.conditions.map(c => {
+      const hint = c.type === 'enum' && c.values.length > 0
+        ? `String (${c.values.join(', ')})`
+        : c.type === 'bool' ? 'bool' : c.type === 'int_range' ? 'i64' : 'String';
+      return `    //     ${c.name}: ..., // ${hint} — map from ctx`;
+    }).join('\n');
+    const outputFields = dt.actions.map(a =>
+      `    //     result["${a.name}"] = Value::String(dt_result.${a.name}.clone());`
+    ).join('\n');
+    return [
+      `    // Call ${fnName} to evaluate ${dtName} rules:`,
+      `    // let dt_input = ${inputStruct} {`,
+      inputArgs,
+      `    // };`,
+      `    // if let Some(dt_result) = ${fnName}(&dt_input) {`,
+      outputFields,
+      `    // }`,
+    ].join('\n');
+  }
+
   // TypeScript (default)
   const fnName = `evaluate${toPascalCase(dtName)}`;
   const inputType = `${toPascalCase(dtName)}Input`;
@@ -963,6 +1065,14 @@ function goCtxRead(fieldName: string, condType: string): string {
   if (condType === 'bool') return `ctx["${fieldName}"].(bool)`;
   if (condType === 'int_range') return `ctx["${fieldName}"].(int)`;
   return `ctx["${fieldName}"].(string)`;
+}
+
+/** Generate a Rust serde_json value extraction for reading a context value. */
+function rustCtxRead(fieldName: string, condType: string): string {
+  if (condType === 'bool') return `ctx["${fieldName}"].as_bool().unwrap_or_default()`;
+  if (condType === 'int_range') return `ctx["${fieldName}"].as_i64().unwrap_or_default()`;
+  if (condType === 'decimal_range') return `ctx["${fieldName}"].as_f64().unwrap_or_default()`;
+  return `ctx["${fieldName}"].as_str().unwrap_or_default().to_string()`;
 }
 
 function generateFullyWiredActionScaffold(
@@ -1031,6 +1141,45 @@ ${inputFields}
 ${outputAssigns}
 \t}
 \treturn result
+}
+`;
+  }
+
+  if (language === 'rust') {
+    const dtFnName = `evaluate_${toSnakeCase(dt.name)}`;
+    const inputStruct = `${toPascalCase(dt.name)}Input`;
+    const ctxReads = dt.conditions
+      .map(c => `    let ${c.name} = ${rustCtxRead(c.name, c.type)};`)
+      .join('\n');
+    const inputFields = dt.conditions
+      .map(c => `        ${c.name},`)
+      .join('\n');
+    const outputAssigns = dt.actions
+      .map(a => {
+        const aType = a.type as string;
+        if (aType === 'bool') return `        result["${a.name}"] = Value::Bool(dt_result.${a.name});`;
+        if (aType === 'int_range') return `        result["${a.name}"] = json!(dt_result.${a.name});`;
+        if (aType === 'decimal_range') return `        result["${a.name}"] = json!(dt_result.${a.name});`;
+        return `        result["${a.name}"] = Value::String(dt_result.${a.name}.clone());`;
+      })
+      .join('\n');
+    return `// Action: ${action.name}
+// Decision table: ${dt.name}
+// Register via: machine.register_action_rust("${action.name}", Box::new(${action.name}))
+
+use serde_json::{Value, json};
+
+fn ${action.name}(ctx: &Value, event: &Value) -> Value {
+${ctxReads}
+    let dt_input = ${inputStruct} {
+${inputFields}
+    };
+    if let Some(dt_result) = ${dtFnName}(&dt_input) {
+        let mut result = ctx.clone();
+${outputAssigns}
+        return result;
+    }
+    ctx.clone()
 }
 `;
   }
@@ -1128,6 +1277,36 @@ ${goTodo}
 \t\tresult[k] = v
 \t}
 \treturn result
+}
+`;
+  }
+
+  if (language === 'rust') {
+    if (action.hasEffect) {
+      return `// Action: ${action.name}
+// Effect: ${action.effectType}
+// Register via: machine.register_action_rust("${action.name}", Box::new(${action.name}))
+
+use serde_json::Value;
+
+fn ${action.name}(ctx: &Value, event: &Value) -> (Value, Effect) {
+    // TODO: Implement effect
+    (ctx.clone(), Effect { effect_type: "${action.effectType}".to_string(), payload: Value::Null })
+}
+`;
+    }
+    const rustDTComment = matchedDT ? '\n' + generateDTCallComment(matchedDT, 'rust') + '\n' : '';
+    const rustTodo = matchedDT
+      ? `    // TODO: Implement action using ${matchedDT.name} decision table`
+      : '    // TODO: Implement action';
+    return `// Action: ${action.name}${matchedDT ? `\n// Decision table: ${matchedDT.name}` : ''}
+// Register via: machine.register_action_rust("${action.name}", Box::new(${action.name}))
+
+use serde_json::Value;
+
+fn ${action.name}(ctx: &Value, event: &Value) -> Value {${rustDTComment}
+${rustTodo}
+    ctx.clone()
 }
 `;
   }
@@ -1996,7 +2175,7 @@ export interface VerifyDTSkillResult {
 
 export interface CompileDTSkillResult {
   status: 'success' | 'error';
-  target: 'typescript' | 'json';
+  target: string;
   output: string;
   warnings: SkillError[];
 }
@@ -2109,7 +2288,7 @@ export function verifyDTSkill(input: SkillInput): VerifyDTSkillResult {
 /**
  * Compile a decision table to TypeScript or JSON.
  */
-export function compileDTSkill(input: SkillInput, target: 'typescript' | 'json' = 'typescript'): CompileDTSkillResult {
+export function compileDTSkill(input: SkillInput, target: string = 'typescript'): CompileDTSkillResult {
   try {
     const source = resolveSource(input);
     const { file } = parseMarkdown(source);
@@ -2124,9 +2303,24 @@ export function compileDTSkill(input: SkillInput, target: 'typescript' | 'json' 
     }
 
     const dt = file.decisionTables[0];
-    const output = target === 'json'
-      ? compileDecisionTableToJSON(dt)
-      : compileDecisionTableToTypeScript(dt);
+    let output: string;
+    switch (target) {
+      case 'json':
+        output = compileDecisionTableToJSON(dt);
+        break;
+      case 'python':
+        output = compileDecisionTableToPython(dt);
+        break;
+      case 'go':
+        output = compileDecisionTableToGo(dt);
+        break;
+      case 'rust':
+        output = compileDecisionTableToRust(dt);
+        break;
+      default:
+        output = compileDecisionTableToTypeScript(dt);
+        break;
+    }
 
     return { status: 'success', target, output, warnings: [] };
   } catch (err) {
