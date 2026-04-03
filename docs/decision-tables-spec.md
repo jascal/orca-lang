@@ -20,6 +20,96 @@ Follow these principles from the existing orca-lang architecture:
 6. **Same skill pattern**: Skills accept `{ source?: string; file?: string }` — no files required
 7. **Parser integration**: The existing markdown parser's multi-document splitting logic (splitting on `---`) already produces separate document chunks. Each chunk's H1 heading determines its type: `# machine` → `MachineDef`, `# decision_table` → `DecisionTableDef`. This is the key integration point.
 
+## Numeric Range Conditions
+
+Decision tables support numeric condition types (`int_range` and `decimal_range`) with comparison operators and range expressions in rule cells. This enables decision tables that operate on continuous numeric domains (credit scores, monetary amounts, ratios) without requiring the user to manually discretize values into string bands.
+
+### Condition Types
+
+| Type | Values Column | Cell Syntax | Compiled Type |
+|------|---------------|-------------|---------------|
+| `bool` | (empty, auto `true,false`) | `true`, `false` | `boolean` / `bool` / `bool` |
+| `enum` | `a, b, c` | `a`, `!a`, `a,b` | union literal / `str` / `string` |
+| `int_range` | `min..max` (domain) | `750+`, `>=750`, `<600`, `700-749`, `10..20` | `number` / `int` / `int` |
+| `decimal_range` | `min..max` (domain) | `0.3+`, `>=0.7`, `<0.3`, `0.3-0.7`, `0.1..0.9` | `number` / `float` / `float64` |
+| `string` | (none) | exact match only | `string` / `str` / `string` |
+
+### Cell Value Patterns for Numeric Types
+
+| Pattern | Meaning | Example |
+|---------|---------|---------|
+| `N+` | `>= N` | `750+` → score >= 750 |
+| `>=N` | `>= N` | `>=0.7` → ratio >= 0.7 |
+| `>N` | `> N` | `>0.5` → ratio > 0.5 |
+| `<=N` | `<= N` | `<=100` → amount <= 100 |
+| `<N` | `< N` | `<600` → score < 600 |
+| `A-B` | `A <= x <= B` | `700-749` → 700 <= score <= 749 |
+| `A..B` | `A <= x <= B` | `0.3..0.7` → 0.3 <= ratio <= 0.7 |
+| `-` | any value | wildcard, covers entire domain |
+
+These patterns are **only recognized** for `int_range` and `decimal_range` condition columns. For `enum` columns, `750+` is treated as a literal string value.
+
+### Domain Declaration
+
+The Values column in `## conditions` declares the domain for numeric types using `min..max` syntax:
+
+```markdown
+| Name | Type | Values |
+|------|------|--------|
+| credit_score | int_range | 300..850 |
+| debt_ratio | decimal_range | 0.0..1.0 |
+```
+
+When a domain is declared, the verifier checks **interval completeness** — the union of all rule intervals must cover the entire domain without gaps. For `int_range`, adjacent integers are treated as contiguous (e.g., `[0, 49]` + `[50, 100]` fully covers `[0, 100]`).
+
+If no domain is declared, completeness checking is skipped with a `DT_COMPLETENESS_SKIPPED` warning.
+
+### Example: Risk Assessment with Numeric Ranges
+
+```markdown
+# decision_table RiskAssessment
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| credit_score | int_range | 300..850 |
+| debt_ratio | decimal_range | 0.0..1.0 |
+| employment | enum | employed, self-employed, unemployed |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| risk_tier | enum | low, medium, high |
+
+## rules
+
+| credit_score | debt_ratio | employment | → risk_tier |
+|--------------|------------|------------|-------------|
+| 750+ | <0.3 | employed | low |
+| 700-749 | <0.3 | employed | low |
+| 700-749 | 0.3-0.5 | - | medium |
+| 600-699 | - | employed | medium |
+| <600 | - | - | high |
+| - | 0.5+ | - | high |
+| - | - | unemployed | high |
+```
+
+This compiles to TypeScript:
+```typescript
+if (input.credit_score >= 750 && input.debt_ratio < 0.3 && input.employment === 'employed') {
+  return { risk_tier: 'low' };
+}
+```
+
+And to Go:
+```go
+if input.CreditScore >= 750 && input.DebtRatio < 0.3 && input.Employment == "employed" {
+  return &RiskAssessmentOutput{RiskTier: "low"}
+}
+```
+
 ## Format Specification
 
 ### Standalone Decision Table
@@ -138,7 +228,7 @@ Used by the route_payment action to select gateway and risk parameters.
 ### Format Rules
 
 - `# decision_table Name` — required H1 heading (peer to `# machine Name`)
-- `## conditions` — table defining inputs. Columns: Name, Type (`bool`, `enum`, `int_range`, `string`), Values (comma-separated for enums, `min..max` for ranges; empty for bool since values are implicitly true/false)
+- `## conditions` — table defining inputs. Columns: Name, Type (`bool`, `enum`, `int_range`, `decimal_range`, `string`), Values (comma-separated for enums, `min..max` for int/decimal ranges declaring the domain; empty for bool since values are implicitly true/false)
 - `## actions` — table defining outputs. Columns: Name, Type, Description
 - `## rules` — the decision table itself. Column headers are condition names (plain) and action names (prefixed with `→` or `->`)
 - `-` in a condition cell means "any" (don't care / wildcard)
@@ -155,13 +245,13 @@ Create `packages/orca-lang/src/parser/dt-ast.ts`:
 ```typescript
 // Decision Table AST
 
-export type ConditionType = 'bool' | 'enum' | 'int_range' | 'string';
+export type ConditionType = 'bool' | 'enum' | 'int_range' | 'decimal_range' | 'string';
 
 export interface ConditionDef {
   name: string;
   type: ConditionType;
   values: string[];         // enum values, or ['true','false'] for bool
-  range?: { min: number; max: number };  // for int_range
+  range?: { min: number; max: number };  // for int_range / decimal_range
 }
 
 export type ActionType = 'bool' | 'enum' | 'string';
@@ -177,7 +267,9 @@ export type CellValue =
   | { kind: 'any' }                           // "-" wildcard
   | { kind: 'exact'; value: string }          // exact match
   | { kind: 'negated'; value: string }        // "!value"
-  | { kind: 'set'; values: string[] };        // "a,b" (match any in set)
+  | { kind: 'set'; values: string[] }         // "a,b" (match any in set)
+  | { kind: 'compare'; op: '>' | '>=' | '<' | '<='; value: number }  // >=750, <0.3
+  | { kind: 'range'; low: number; high: number; lowInc: boolean; highInc: boolean }; // 700-749, 0.3-0.4
 
 export interface Rule {
   number?: number;           // optional rule # from the # column
@@ -238,6 +330,13 @@ In the `## rules` table, cell content is micro-parsed:
 | `!value` | `{ kind: 'negated', value: 'value' }` | Negation |
 | `a,b,c` | `{ kind: 'set', values: ['a','b','c'] }` | Multi-value (match any) |
 | empty cell | `{ kind: 'any' }` | Treat same as `-` |
+| `750+` | `{ kind: 'compare', op: '>=', value: 750 }` | Suffix-plus (int_range/decimal_range only) |
+| `>=750` | `{ kind: 'compare', op: '>=', value: 750 }` | Comparison operator |
+| `<0.3` | `{ kind: 'compare', op: '<', value: 0.3 }` | Comparison operator |
+| `700-749` | `{ kind: 'range', low: 700, high: 749, lowInc: true, highInc: true }` | Dash-separated range (int_range/decimal_range only) |
+| `0.3..0.7` | `{ kind: 'range', low: 0.3, high: 0.7, lowInc: true, highInc: true }` | Dot-dot range |
+
+**Note**: Numeric cell patterns (`compare` and `range`) are only recognized for `int_range` and `decimal_range` condition types. For `enum` or `string` conditions, values like `750+` or `<0.3` are parsed as exact strings.
 
 ### Column Detection in Rules Table
 
@@ -276,11 +375,11 @@ Create `packages/orca-lang/src/verifier/dt-verifier.ts`.
 ### Verification Checks
 
 **Completeness Check** (`DT_INCOMPLETE`):
-- For each possible combination of condition values, check that at least one rule matches.
-- For small tables (product of all condition value counts ≤ 4096 combinations), enumerate all combinations and check each against the rules.
-- For larger tables, use a symbolic approach: check that wildcard coverage + explicit rules span the space (or emit a warning that full completeness checking was skipped due to size, code `DT_COMPLETENESS_SKIPPED`).
-- `-` (any) cells implicitly cover all values for that condition.
-- Report missing combinations as errors, including the specific uncovered input vector in the suggestion.
+- For `enum`/`bool` conditions: enumerate all value combinations (product ≤ 4096) and check that at least one rule matches each. For larger tables, emit `DT_COMPLETENESS_SKIPPED` warning.
+- For `int_range`/`decimal_range` conditions: use **interval arithmetic** — project each numeric axis, merge the covered intervals, and check for gaps against the declared domain (`min..max` from the Values column). Integer adjacency is handled for `int_range` (e.g., `[0,49]` + `[50,100]` is contiguous). If no domain range is declared, emit `DT_COMPLETENESS_SKIPPED` warning.
+- For **mixed tables** (numeric + enum/bool): numeric axes are checked via interval analysis; enum/bool axes are checked via cartesian enumeration; both must pass.
+- `-` (any) cells implicitly cover all values / the entire domain for that condition.
+- Report missing combinations or uncovered ranges as errors.
 
 **Consistency Check** (`DT_INCONSISTENT`):
 - Find pairs of rules that can match the same input but produce different action values.
@@ -381,8 +480,12 @@ Key details:
 - Bool conditions generate `=== true` / `=== false`
 - Negated conditions generate `!== value`
 - Set conditions generate `(input.x === 'a' || input.x === 'b')`
+- Compare conditions (`>=750`, `<0.3`) generate `input.x >= 750`, `input.x < 0.3`
+- Range conditions (`700-749`) generate `(input.x >= 700 && input.x <= 749)`
+- `int_range` and `decimal_range` condition types map to `number` in TypeScript, `int`/`float` in Python, `int`/`float64` in Go
 - Function returns `null` if no rule matches (caller handles default)
 - Function name is `evaluate` + PascalCase table name
+- **All three targets** (TypeScript, Python, Go) support the same cell value types including numeric comparisons and ranges
 
 **JSON** (`target: 'json'`):
 Serialize the verified table as a portable JSON structure:
@@ -515,6 +618,8 @@ Create example files in `packages/orca-lang/examples/`:
 3. **`payment-with-routing.orca.md`** — combined machine + decision table. A payment processor state machine with an embedded PaymentRouting decision table. Demonstrates the co-location pattern.
 
 4. **`shipping-rules.dt.orca.md`** — shipping cost calculator with enum tiers for weight and zone. Tests broader condition types.
+
+5. **`loan-workflow.orca.md`** (in `packages/demo-go/orca/`) — combined machine + two formal decision tables using `int_range` and `decimal_range` conditions with comparison operators (`750+`, `<600`, `0.3-0.4`) and range expressions. Demonstrates numeric range support across the full pipeline.
 
 Each example should pass `verify_decision_table` cleanly. The combined example should pass both `verify_machine` and `verify_decision_table`.
 

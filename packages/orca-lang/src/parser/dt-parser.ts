@@ -21,7 +21,37 @@ function findColumnIndex(headers: string[], name: string): number {
 
 // --- Cell Value Parsing ---
 
-function parseCellValue(text: string | undefined): CellValue {
+function parseNumericCell(text: string): CellValue | null {
+  // Suffix form: 750+ means >=750
+  const suffixPlus = text.match(/^(-?\d+(?:\.\d+)?)\+$/);
+  if (suffixPlus) {
+    return { kind: 'compare', op: '>=', value: parseFloat(suffixPlus[1]) };
+  }
+
+  // Comparison operators: >=750, <=0.3, >100, <600
+  const cmpMatch = text.match(/^(>=|<=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
+  if (cmpMatch) {
+    return { kind: 'compare', op: cmpMatch[1] as '>' | '>=' | '<' | '<=', value: parseFloat(cmpMatch[2]) };
+  }
+
+  // Range with .. separator: 1..50 (inclusive both ends)
+  const dotRange = text.match(/^(-?\d+(?:\.\d+)?)\s*\.\.\s*(-?\d+(?:\.\d+)?)$/);
+  if (dotRange) {
+    return { kind: 'range', low: parseFloat(dotRange[1]), high: parseFloat(dotRange[2]), lowInc: true, highInc: true };
+  }
+
+  // Range with - separator for numbers: 700-749, 0.3-0.4
+  // Must have at least one side that looks numeric (digit-starting).
+  // Negative numbers on the left are ambiguous with subtraction — require left >= 0.
+  const dashRange = text.match(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/);
+  if (dashRange) {
+    return { kind: 'range', low: parseFloat(dashRange[1]), high: parseFloat(dashRange[2]), lowInc: true, highInc: true };
+  }
+
+  return null;
+}
+
+function parseCellValue(text: string | undefined, condType?: ConditionType): CellValue {
   if (!text || text.trim() === '' || text.trim() === '-') {
     return { kind: 'any' };
   }
@@ -34,6 +64,12 @@ function parseCellValue(text: string | undefined): CellValue {
     if (negatedValue) {
       return { kind: 'negated', value: negatedValue };
     }
+  }
+
+  // Numeric range/compare patterns — only attempt for numeric condition types
+  if (condType === 'int_range' || condType === 'decimal_range') {
+    const numeric = parseNumericCell(trimmed);
+    if (numeric) return numeric;
   }
 
   // Set: a,b,c
@@ -65,11 +101,11 @@ function parseConditionsTable(table: MdTable): ConditionDef[] {
 
     if (type === 'bool') {
       values = valuesStr.trim() ? valuesStr.split(',').map(v => v.trim()) : ['true', 'false'];
-    } else if (type === 'int_range') {
-      // Parse min..max format
-      const rangeMatch = valuesStr.match(/(\d+)\s*\.\.\s*(\d+)/);
+    } else if (type === 'int_range' || type === 'decimal_range') {
+      // Parse min..max format (integers or decimals)
+      const rangeMatch = valuesStr.match(/(-?\d+(?:\.\d+)?)\s*\.\.\s*(-?\d+(?:\.\d+)?)/);
       if (rangeMatch) {
-        range = { min: parseInt(rangeMatch[1], 10), max: parseInt(rangeMatch[2], 10) };
+        range = { min: parseFloat(rangeMatch[1]), max: parseFloat(rangeMatch[2]) };
         values = [];
       } else {
         values = [];
@@ -116,7 +152,8 @@ function parseActionsTable(table: MdTable): ActionOutputDef[] {
 function parseRulesTable(
   table: MdTable,
   conditionNames: Set<string>,
-  actionNames: Set<string>
+  actionNames: Set<string>,
+  conditionDefs?: ConditionDef[]
 ): { rules: Rule[]; warnings: string[] } {
   const warnings: string[] = [];
   const rules: Rule[] = [];
@@ -167,7 +204,8 @@ function parseRulesTable(
           rule.number = num;
         }
       } else if (col.type === 'condition') {
-        const cellValue = parseCellValue(cell);
+        const condDef = conditionDefs?.find(c => c.name === col.name);
+        const cellValue = parseCellValue(cell, condDef?.type);
         rule.conditions.set(col.name, cellValue);
       } else if (col.type === 'action') {
         const value = cell?.trim() || '';
@@ -254,7 +292,7 @@ export function parseDecisionTable(elements: MdElement[]): { decisionTable: Deci
       } else if (currentSection === 'actions') {
         actions = parseActionsTable(el);
       } else if (currentSection === 'rules') {
-        const result = parseRulesTable(el, new Set(conditions.map(c => c.name)), new Set(actions.map(a => a.name)));
+        const result = parseRulesTable(el, new Set(conditions.map(c => c.name)), new Set(actions.map(a => a.name)), conditions);
         rules = result.rules;
         warnings.push(...result.warnings);
       }

@@ -14,7 +14,7 @@ function getConditionValues(condition: ConditionDef): string[] {
   return condition.values;
 }
 
-// Check if a cell matches a given value
+// Check if a cell matches a given value (string or numeric)
 function cellMatches(cell: CellValue, value: string): boolean {
   switch (cell.kind) {
     case 'any':
@@ -25,6 +25,24 @@ function cellMatches(cell: CellValue, value: string): boolean {
       return cell.value !== value;
     case 'set':
       return cell.values.includes(value);
+    case 'compare': {
+      const num = parseFloat(value);
+      if (isNaN(num)) return false;
+      switch (cell.op) {
+        case '>':  return num > cell.value;
+        case '>=': return num >= cell.value;
+        case '<':  return num < cell.value;
+        case '<=': return num <= cell.value;
+      }
+      return false;
+    }
+    case 'range': {
+      const num = parseFloat(value);
+      if (isNaN(num)) return false;
+      const aboveLow = cell.lowInc ? num >= cell.low : num > cell.low;
+      const belowHigh = cell.highInc ? num <= cell.high : num < cell.high;
+      return aboveLow && belowHigh;
+    }
   }
 }
 
@@ -102,6 +120,44 @@ function cellsIntersect(cell1: CellValue, cell2: CellValue): boolean {
   if (cell1.kind === 'set' && cell2.kind === 'set') {
     return cell1.values.some(v => cell2.values.includes(v));
   }
+
+  // --- Numeric cell intersection helpers ---
+
+  // Convert a cell to a numeric interval [low, high] (inclusive flags)
+  // Returns null for non-numeric kinds.
+  function toInterval(cell: CellValue): { low: number; high: number; lowInc: boolean; highInc: boolean } | null {
+    if (cell.kind === 'range') {
+      return { low: cell.low, high: cell.high, lowInc: cell.lowInc, highInc: cell.highInc };
+    }
+    if (cell.kind === 'compare') {
+      switch (cell.op) {
+        case '>=': return { low: cell.value, high: Infinity, lowInc: true, highInc: false };
+        case '>':  return { low: cell.value, high: Infinity, lowInc: false, highInc: false };
+        case '<=': return { low: -Infinity, high: cell.value, lowInc: false, highInc: true };
+        case '<':  return { low: -Infinity, high: cell.value, lowInc: false, highInc: false };
+      }
+    }
+    if (cell.kind === 'exact') {
+      const n = parseFloat(cell.value);
+      if (!isNaN(n)) return { low: n, high: n, lowInc: true, highInc: true };
+    }
+    return null;
+  }
+
+  function intervalsOverlap(
+    a: { low: number; high: number; lowInc: boolean; highInc: boolean },
+    b: { low: number; high: number; lowInc: boolean; highInc: boolean }
+  ): boolean {
+    // a.high < b.low or a.high == b.low and at least one exclusive → no overlap
+    if (a.high < b.low || b.high < a.low) return false;
+    if (a.high === b.low && !(a.highInc && b.lowInc)) return false;
+    if (b.high === a.low && !(b.highInc && a.lowInc)) return false;
+    return true;
+  }
+
+  const iv1 = toInterval(cell1);
+  const iv2 = toInterval(cell2);
+  if (iv1 && iv2) return intervalsOverlap(iv1, iv2);
 
   return true;
 }
@@ -345,7 +401,6 @@ function checkStructural(dt: DecisionTableDef): VerificationError[] {
 
 function cellsEqual(cell1: CellValue, cell2: CellValue): boolean {
   if (cell1.kind !== cell2.kind) return false;
-  // Now cell1 and cell2 have the same kind, narrow both
   const kind = cell1.kind;
   if (kind === 'any') return true;
   if (kind === 'exact') {
@@ -359,6 +414,16 @@ function cellsEqual(cell1: CellValue, cell2: CellValue): boolean {
     const s2 = cell2 as { kind: 'set'; values: string[] };
     return s1.values.length === s2.values.length && s1.values.every(v => s2.values.includes(v));
   }
+  if (kind === 'compare') {
+    const c1 = cell1 as { kind: 'compare'; op: string; value: number };
+    const c2 = cell2 as { kind: 'compare'; op: string; value: number };
+    return c1.op === c2.op && c1.value === c2.value;
+  }
+  if (kind === 'range') {
+    const r1 = cell1 as { kind: 'range'; low: number; high: number; lowInc: boolean; highInc: boolean };
+    const r2 = cell2 as { kind: 'range'; low: number; high: number; lowInc: boolean; highInc: boolean };
+    return r1.low === r2.low && r1.high === r2.high && r1.lowInc === r2.lowInc && r1.highInc === r2.highInc;
+  }
   return true;
 }
 
@@ -366,26 +431,174 @@ function cellsEqual(cell1: CellValue, cell2: CellValue): boolean {
 // Completeness Check
 // ============================================================
 
+// --- Interval-based completeness for numeric conditions ---
+
+interface Interval {
+  low: number;
+  high: number;
+  lowInc: boolean;
+  highInc: boolean;
+}
+
+/** Convert a CellValue to a list of intervals it covers within the given domain. */
+function cellToIntervals(cell: CellValue, domain: Interval): Interval[] {
+  switch (cell.kind) {
+    case 'any':
+      return [domain];
+    case 'compare':
+      switch (cell.op) {
+        case '>=': return [{ low: Math.max(cell.value, domain.low), high: domain.high, lowInc: cell.value >= domain.low, highInc: domain.highInc }];
+        case '>':  return [{ low: Math.max(cell.value, domain.low), high: domain.high, lowInc: false, highInc: domain.highInc }];
+        case '<=': return [{ low: domain.low, high: Math.min(cell.value, domain.high), lowInc: domain.lowInc, highInc: cell.value <= domain.high }];
+        case '<':  return [{ low: domain.low, high: Math.min(cell.value, domain.high), lowInc: domain.lowInc, highInc: false }];
+      }
+      return [];
+    case 'range':
+      return [{
+        low: Math.max(cell.low, domain.low),
+        high: Math.min(cell.high, domain.high),
+        lowInc: cell.low > domain.low ? cell.lowInc : domain.lowInc,
+        highInc: cell.high < domain.high ? cell.highInc : domain.highInc,
+      }];
+    case 'exact': {
+      const v = parseFloat(cell.value);
+      if (isNaN(v)) return [];
+      if (v >= domain.low && v <= domain.high) return [{ low: v, high: v, lowInc: true, highInc: true }];
+      return [];
+    }
+    default:
+      return [];
+  }
+}
+
+/** Check if a sorted list of non-overlapping intervals covers the entire domain without gaps.
+ *  For integer types, adjacent integers (e.g., [a,N] and [N+1,b]) are treated as contiguous. */
+function checkIntervalCoverage(intervals: Interval[], domain: Interval, isInteger: boolean): Interval[] {
+  if (intervals.length === 0) return [domain];
+
+  // Sort by low bound, then by inclusive (inclusive first)
+  const sorted = [...intervals].sort((a, b) => {
+    if (a.low !== b.low) return a.low - b.low;
+    if (a.lowInc && !b.lowInc) return -1;
+    if (!a.lowInc && b.lowInc) return 1;
+    return 0;
+  });
+
+  // Merge overlapping/adjacent intervals
+  const merged: Interval[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = merged[merged.length - 1];
+    const curr = sorted[i];
+    // Adjacent or overlapping: prev.high >= curr.low (or == with at least one inclusive)
+    // For integers: [a, N] and [N+1, b] are adjacent
+    const adjacent = prev.high > curr.low
+      || (prev.high === curr.low && (prev.highInc || curr.lowInc))
+      || (isInteger && prev.highInc && curr.lowInc && curr.low === prev.high + 1);
+    if (adjacent) {
+      if (curr.high > prev.high) {
+        prev.high = curr.high;
+        prev.highInc = curr.highInc;
+      } else if (curr.high === prev.high) {
+        prev.highInc = prev.highInc || curr.highInc;
+      }
+    } else {
+      merged.push({ ...curr });
+    }
+  }
+
+  // Check for gaps against domain
+  const gaps: Interval[] = [];
+  let cursor = domain.low;
+  let cursorInc = domain.lowInc;
+
+  for (const iv of merged) {
+    // Is there a gap between cursor and this interval's start?
+    if (iv.low > cursor || (iv.low === cursor && !iv.lowInc && cursorInc)) {
+      // Gap starts just after the cursor (cursor itself is covered if cursorInc)
+      gaps.push({ low: cursor, high: iv.low, lowInc: !cursorInc, highInc: !iv.lowInc });
+    }
+    if (iv.high > cursor || (iv.high === cursor && iv.highInc && !cursorInc)) {
+      cursor = iv.high;
+      cursorInc = iv.highInc;
+    }
+  }
+
+  if (cursor < domain.high || (cursor === domain.high && !cursorInc && domain.highInc)) {
+    gaps.push({ low: cursor, high: domain.high, lowInc: !cursorInc, highInc: domain.highInc });
+  }
+
+  return gaps;
+}
+
+/** Check completeness of numeric conditions on a single numeric axis.
+ *  For each numeric condition, project the rules onto that axis (treating all
+ *  other conditions as wildcards) and verify there are no gaps in the domain. */
+function checkNumericCompleteness(dt: DecisionTableDef): VerificationError[] {
+  const errors: VerificationError[] = [];
+
+  for (const cond of dt.conditions) {
+    if (cond.type !== 'int_range' && cond.type !== 'decimal_range') continue;
+    if (!cond.range) {
+      errors.push({
+        code: 'DT_COMPLETENESS_SKIPPED',
+        message: `Completeness check skipped for '${cond.name}': no domain range declared (use Values column e.g. "0..1000")`,
+        severity: 'warning',
+        location: { decisionTable: dt.name, condition: cond.name },
+        suggestion: `Add a domain range to the conditions table, e.g. "0..1000" in the Values column`,
+      });
+      continue;
+    }
+
+    const domain: Interval = { low: cond.range.min, high: cond.range.max, lowInc: true, highInc: true };
+
+    // Collect all intervals from rules for this condition
+    const allIntervals: Interval[] = [];
+    for (const rule of dt.rules) {
+      const cell = rule.conditions.get(cond.name);
+      if (!cell) {
+        // No condition means wildcard — covers entire domain
+        allIntervals.push(domain);
+      } else {
+        allIntervals.push(...cellToIntervals(cell, domain));
+      }
+    }
+
+    const gaps = checkIntervalCoverage(allIntervals, domain, cond.type === 'int_range');
+    for (const gap of gaps) {
+      const lowBound = gap.lowInc ? '[' : '(';
+      const highBound = gap.highInc ? ']' : ')';
+      errors.push({
+        code: 'DT_INCOMPLETE',
+        message: `Numeric condition '${cond.name}' has uncovered range ${lowBound}${gap.low}, ${gap.high}${highBound}`,
+        severity: 'error',
+        location: { decisionTable: dt.name, condition: cond.name },
+        suggestion: `Add a rule covering the range ${lowBound}${gap.low}, ${gap.high}${highBound}`,
+      });
+    }
+  }
+
+  return errors;
+}
+
 function checkCompleteness(dt: DecisionTableDef): VerificationError[] {
   const errors: VerificationError[] = [];
 
   if (dt.conditions.length === 0) return errors; // Already reported in structural
 
-  // int_range conditions cannot be exhaustively enumerated — skip completeness check
-  if (dt.conditions.some(c => c.type === 'int_range')) {
-    errors.push({
-      code: 'DT_COMPLETENESS_SKIPPED',
-      message: 'Completeness check skipped: int_range conditions cannot be exhaustively enumerated',
-      severity: 'warning',
-      location: { decisionTable: dt.name },
-      suggestion: 'Manually verify that all numeric ranges are covered without gaps',
-    });
-    return errors;
+  const hasNumericConditions = dt.conditions.some(c => c.type === 'int_range' || c.type === 'decimal_range');
+  const enumBoolConditions = dt.conditions.filter(c => c.type !== 'int_range' && c.type !== 'decimal_range');
+
+  // Interval-based completeness for numeric conditions (per-axis projection)
+  if (hasNumericConditions) {
+    errors.push(...checkNumericCompleteness(dt));
   }
 
-  // Calculate total combinations for enum/bool conditions
+  // Skip cartesian enumeration if there are no enum/bool conditions
+  if (enumBoolConditions.length === 0) return errors;
+
+  // Calculate total combinations for enum/bool conditions only
   let totalCombinations = 1;
-  for (const cond of dt.conditions) {
+  for (const cond of enumBoolConditions) {
     const values = getConditionValues(cond);
     if (values.length === 0) {
       totalCombinations = Infinity;
@@ -398,7 +611,7 @@ function checkCompleteness(dt: DecisionTableDef): VerificationError[] {
   if (totalCombinations > 4096) {
     errors.push({
       code: 'DT_COMPLETENESS_SKIPPED',
-      message: `Completeness check skipped: ${totalCombinations} combinations exceed limit of 4096`,
+      message: `Completeness check skipped: ${totalCombinations} enum/bool combinations exceed limit of 4096`,
       severity: 'warning',
       location: { decisionTable: dt.name },
       suggestion: 'Consider simplifying conditions or using wildcards to reduce combination count',
@@ -406,22 +619,52 @@ function checkCompleteness(dt: DecisionTableDef): VerificationError[] {
     return errors;
   }
 
-  // Generate all combinations and check coverage
-  const combinations = generateCombinations(dt.conditions);
-  const actionNames = dt.actions.map(a => a.name);
-
-  for (const combo of combinations) {
-    const matchingRules = findMatchingRules(dt, combo);
-
-    if (matchingRules.length === 0) {
-      const comboDesc = [...combo.entries()].map(([k, v]) => `${k}=${v}`).join(', ');
-      errors.push({
-        code: 'DT_INCOMPLETE',
-        message: `Missing coverage for: ${comboDesc}`,
-        severity: 'error',
-        location: { decisionTable: dt.name },
-        suggestion: `Add a rule to cover this condition combination`,
+  // For mixed tables (numeric + enum/bool), enumerate only the enum/bool axes
+  // and check that for each enum/bool combination, at least one rule could fire
+  // (numeric conditions are checked separately above via interval analysis)
+  if (hasNumericConditions) {
+    // Enumerate enum/bool combinations, check that at least one rule has matching enum/bool
+    // cells (ignoring numeric conditions which are covered by interval checks)
+    const enumCombinations = generateCombinations(enumBoolConditions);
+    for (const combo of enumCombinations) {
+      const anyRuleMatchesEnums = dt.rules.some(rule => {
+        for (const cond of enumBoolConditions) {
+          const cell = rule.conditions.get(cond.name);
+          if (!cell) continue;
+          const expectedValue = combo.get(cond.name);
+          if (!cellMatches(cell, expectedValue || '')) return false;
+        }
+        return true;
       });
+
+      if (!anyRuleMatchesEnums) {
+        const comboDesc = [...combo.entries()].map(([k, v]) => `${k}=${v}`).join(', ');
+        errors.push({
+          code: 'DT_INCOMPLETE',
+          message: `Missing coverage for enum/bool combination: ${comboDesc}`,
+          severity: 'error',
+          location: { decisionTable: dt.name },
+          suggestion: `Add a rule to cover this condition combination`,
+        });
+      }
+    }
+  } else {
+    // Pure enum/bool table — original cartesian completeness check
+    const combinations = generateCombinations(dt.conditions);
+
+    for (const combo of combinations) {
+      const matchingRules = findMatchingRules(dt, combo);
+
+      if (matchingRules.length === 0) {
+        const comboDesc = [...combo.entries()].map(([k, v]) => `${k}=${v}`).join(', ');
+        errors.push({
+          code: 'DT_INCOMPLETE',
+          message: `Missing coverage for: ${comboDesc}`,
+          severity: 'error',
+          location: { decisionTable: dt.name },
+          suggestion: `Add a rule to cover this condition combination`,
+        });
+      }
     }
   }
 
