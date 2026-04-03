@@ -193,7 +193,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
 
     case 'compile_decision_table': {
       const source = args.source as string;
-      const target = (args.target as 'typescript' | 'json') ?? 'typescript';
+      const target = (args.target as string) ?? 'typescript';
       return compileDTSkill({ source }, target);
     }
 

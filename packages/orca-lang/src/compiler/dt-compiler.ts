@@ -482,3 +482,121 @@ export function compileDecisionTableToGo(dt: DecisionTableDef): string {
 
   return lines.join('\n');
 }
+
+// ============================================================
+// Rust Compiler
+// ============================================================
+
+function generateRustType(type: string): string {
+  if (type === 'bool') return 'bool';
+  if (type === 'int_range') return 'i64';
+  if (type === 'decimal_range') return 'f64';
+  return 'String';
+}
+
+function generateRustConditionCheck(condName: string, condType: string, cell: CellValue): string {
+  switch (cell.kind) {
+    case 'any':
+      return '';
+    case 'exact':
+      if (condType === 'bool') return `input.${condName} == ${cell.value}`;
+      if (condType === 'int_range' || condType === 'decimal_range') return `input.${condName} == ${cell.value}`;
+      return `input.${condName} == "${cell.value}"`;
+    case 'negated':
+      if (condType === 'bool') return `input.${condName} != ${cell.value}`;
+      return `input.${condName} != "${cell.value}"`;
+    case 'set': {
+      const checks = cell.values.map(v =>
+        condType === 'bool' ? `input.${condName} == ${v}` : `input.${condName} == "${v}"`
+      ).join(' || ');
+      return `(${checks})`;
+    }
+    case 'compare':
+      return `input.${condName} ${cell.op} ${cell.value}`;
+    case 'range': {
+      const lowCheck = cell.lowInc ? `input.${condName} >= ${cell.low}` : `input.${condName} > ${cell.low}`;
+      const highCheck = cell.highInc ? `input.${condName} <= ${cell.high}` : `input.${condName} < ${cell.high}`;
+      return `(${lowCheck} && ${highCheck})`;
+    }
+    default:
+      return '';
+  }
+}
+
+export function compileDecisionTableToRust(dt: DecisionTableDef): string {
+  const inputTypeName = `${toPascalCase(dt.name)}Input`;
+  const outputTypeName = `${toPascalCase(dt.name)}Output`;
+  const fnName = `evaluate_${toSnakeCase(dt.name)}`;
+
+  const lines: string[] = [];
+
+  lines.push(`/// Input conditions for the ${dt.name} decision table`);
+  lines.push('#[derive(Debug, Clone)]');
+  lines.push(`pub struct ${inputTypeName} {`);
+  for (const cond of dt.conditions) {
+    const rustType = generateRustType(cond.type);
+    const comment = cond.type === 'enum' && cond.values.length > 0
+      ? ` // ${cond.values.join(', ')}`
+      : '';
+    lines.push(`    pub ${cond.name}: ${rustType},${comment}`);
+  }
+  lines.push('}');
+  lines.push('');
+
+  lines.push(`/// Decision outputs for the ${dt.name} decision table`);
+  lines.push('#[derive(Debug, Clone)]');
+  lines.push(`pub struct ${outputTypeName} {`);
+  for (const action of dt.actions) {
+    const rustType = generateRustType(action.type);
+    const comment = action.type === 'enum' && action.values && action.values.length > 0
+      ? ` // ${action.values.join(', ')}`
+      : '';
+    lines.push(`    pub ${action.name}: ${rustType},${comment}`);
+  }
+  lines.push('}');
+  lines.push('');
+
+  const policy = dt.policy ?? 'first-match';
+  lines.push(`/// Evaluate the ${dt.name} decision table (${policy} policy)`);
+  lines.push(`pub fn ${fnName}(input: &${inputTypeName}) -> Option<${outputTypeName}> {`);
+
+  for (let ruleIdx = 0; ruleIdx < dt.rules.length; ruleIdx++) {
+    const rule = dt.rules[ruleIdx];
+    const ruleNum = rule.number ?? ruleIdx + 1;
+
+    const checks: string[] = [];
+    for (const [condName, cell] of rule.conditions) {
+      const condDef = dt.conditions.find(c => c.name === condName);
+      const condType = condDef?.type ?? 'string';
+      const check = generateRustConditionCheck(condName, condType, cell);
+      if (check) checks.push(check);
+    }
+
+    const actionFields = dt.actions
+      .map(a => {
+        const value = rule.actions.get(a.name);
+        if (value === undefined) return null;
+        const aType = a.type as string;
+        if (aType === 'bool') return `${a.name}: ${value}`;
+        if (aType === 'int_range') return `${a.name}: ${value}`;
+        if (aType === 'decimal_range') return `${a.name}: ${value}`;
+        return `${a.name}: "${value}".to_string()`;
+      })
+      .filter((v): v is string => v !== null)
+      .join(', ');
+
+    lines.push(`    // Rule ${ruleNum}`);
+    if (checks.length === 0) {
+      lines.push(`    return Some(${outputTypeName} { ${actionFields} });`);
+    } else {
+      lines.push(`    if ${checks.join(' && ')} {`);
+      lines.push(`        return Some(${outputTypeName} { ${actionFields} });`);
+      lines.push(`    }`);
+    }
+  }
+
+  lines.push('    None // no rule matched');
+  lines.push('}');
+
+  return lines.join('\n');
+}

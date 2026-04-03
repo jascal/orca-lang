@@ -1,0 +1,14 @@
+[package]
+name = "orca-demo-rust"
+version = "0.1.0"
+edition = "2021"
+description = "Conway's Game of Life -- each cell is an Orca state machine"
+
+[[bin]]
+name = "gameoflife"
+path = "src/main.rs"
+
+[dependencies]
+orca-runtime-rust = { path = "../runtime-rust" }
+crossterm = "0.28"
+serde_json = "1"
