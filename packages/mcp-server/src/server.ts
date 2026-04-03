@@ -103,6 +103,8 @@ Minimal decision table:
 - Transitions reference actions by name only — no action bodies in Orca
 - Multi-machine: separate files with ---, use invoke: ChildMachine in states
 - Decision table rules: "-" means "any", "!value" negates, "a,b" means OR. First match wins.
+- Decision table condition types: bool, enum, int_range (Values: min..max), decimal_range (Values: min..max), string.
+- Numeric cell patterns (int_range/decimal_range only): 750+ (>=750), >=N, >N, <=N, <N, A-B (range), A..B (range).
 `;
 
 // ── Tool dispatch ─────────────────────────────────────────────────────────────

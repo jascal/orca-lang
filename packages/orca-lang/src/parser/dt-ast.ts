@@ -1,6 +1,6 @@
 // Decision Table AST Types
 
-export type ConditionType = 'bool' | 'enum' | 'int_range' | 'string';
+export type ConditionType = 'bool' | 'enum' | 'int_range' | 'decimal_range' | 'string';
 
 export interface ConditionDef {
   name: string;
@@ -22,7 +22,9 @@ export type CellValue =
   | { kind: 'any' }                           // "-" wildcard
   | { kind: 'exact'; value: string }          // exact match
   | { kind: 'negated'; value: string }        // "!value"
-  | { kind: 'set'; values: string[] };        // "a,b" (match any in set)
+  | { kind: 'set'; values: string[] }         // "a,b" (match any in set)
+  | { kind: 'compare'; op: '>' | '>=' | '<' | '<='; value: number }  // >=750, <0.3
+  | { kind: 'range'; low: number; high: number; lowInc: boolean; highInc: boolean }; // 700..749, 0.3-0.4
 
 export interface Rule {
   number?: number;           // optional rule # from the # column

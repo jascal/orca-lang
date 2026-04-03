@@ -530,4 +530,264 @@ It can span multiple lines.
       expect(dt.policy).toBe('first-match');
     });
   });
+
+  describe('numeric range conditions', () => {
+    it('parses int_range condition type with domain', () => {
+      const result = parseMarkdown(`# decision_table NumericTest
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 0..100 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| grade | enum |
+
+## rules
+
+| score | → grade |
+|-------|---------|
+| 90+ | A |
+| 80-89 | B |
+| <80 | C |
+`);
+
+      const dt = result.file.decisionTables[0];
+      expect(dt.conditions).toHaveLength(1);
+      expect(dt.conditions[0].type).toBe('int_range');
+      expect(dt.conditions[0].range).toEqual({ min: 0, max: 100 });
+    });
+
+    it('parses decimal_range condition type with domain', () => {
+      const result = parseMarkdown(`# decision_table DecimalTest
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| ratio | decimal_range | 0.0..1.0 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| level | enum |
+
+## rules
+
+| ratio | → level |
+|-------|---------|
+| <0.3 | low |
+| 0.3-0.7 | medium |
+| 0.7+ | high |
+`);
+
+      const dt = result.file.decisionTables[0];
+      expect(dt.conditions).toHaveLength(1);
+      expect(dt.conditions[0].type).toBe('decimal_range');
+      expect(dt.conditions[0].range).toEqual({ min: 0.0, max: 1.0 });
+    });
+
+    it('parses suffix-plus cell as compare >=', () => {
+      const result = parseMarkdown(`# decision_table T
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| x | int_range | 0..100 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| y | enum |
+
+## rules
+
+| x | → y |
+|---|-----|
+| 50+ | a |
+`);
+
+      const dt = result.file.decisionTables[0];
+      const cell = dt.rules[0].conditions.get('x');
+      expect(cell).toEqual({ kind: 'compare', op: '>=', value: 50 });
+    });
+
+    it('parses comparison operators (<, <=, >, >=)', () => {
+      const result = parseMarkdown(`# decision_table T
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| x | decimal_range | 0.0..1.0 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| y | enum |
+
+## rules
+
+| x | → y |
+|---|-----|
+| <0.3 | low |
+| >=0.7 | high |
+| <=0.5 | mid |
+| >0.9 | top |
+`);
+
+      const dt = result.file.decisionTables[0];
+      expect(dt.rules[0].conditions.get('x')).toEqual({ kind: 'compare', op: '<', value: 0.3 });
+      expect(dt.rules[1].conditions.get('x')).toEqual({ kind: 'compare', op: '>=', value: 0.7 });
+      expect(dt.rules[2].conditions.get('x')).toEqual({ kind: 'compare', op: '<=', value: 0.5 });
+      expect(dt.rules[3].conditions.get('x')).toEqual({ kind: 'compare', op: '>', value: 0.9 });
+    });
+
+    it('parses dash-separated numeric range', () => {
+      const result = parseMarkdown(`# decision_table T
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 0..100 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| y | enum |
+
+## rules
+
+| score | → y |
+|-------|-----|
+| 70-89 | b |
+`);
+
+      const dt = result.file.decisionTables[0];
+      expect(dt.rules[0].conditions.get('score')).toEqual({
+        kind: 'range', low: 70, high: 89, lowInc: true, highInc: true,
+      });
+    });
+
+    it('parses dot-dot range separator', () => {
+      const result = parseMarkdown(`# decision_table T
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| x | int_range | 1..50 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| y | enum |
+
+## rules
+
+| x | → y |
+|---|-----|
+| 10..20 | a |
+`);
+
+      const dt = result.file.decisionTables[0];
+      expect(dt.rules[0].conditions.get('x')).toEqual({
+        kind: 'range', low: 10, high: 20, lowInc: true, highInc: true,
+      });
+    });
+
+    it('parses decimal range with dash separator', () => {
+      const result = parseMarkdown(`# decision_table T
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| ratio | decimal_range | 0.0..1.0 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| y | enum |
+
+## rules
+
+| ratio | → y |
+|-------|-----|
+| 0.3-0.7 | mid |
+`);
+
+      const dt = result.file.decisionTables[0];
+      expect(dt.rules[0].conditions.get('ratio')).toEqual({
+        kind: 'range', low: 0.3, high: 0.7, lowInc: true, highInc: true,
+      });
+    });
+
+    it('does not parse numeric patterns for enum conditions', () => {
+      const result = parseMarkdown(`# decision_table T
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| tier | enum | 100+, <50 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| y | enum |
+
+## rules
+
+| tier | → y |
+|------|-----|
+| 100+ | a |
+| <50 | b |
+`);
+
+      const dt = result.file.decisionTables[0];
+      // Should be parsed as exact string values, not numeric cells
+      expect(dt.rules[0].conditions.get('tier')).toEqual({ kind: 'exact', value: '100+' });
+      expect(dt.rules[1].conditions.get('tier')).toEqual({ kind: 'exact', value: '<50' });
+    });
+
+    it('parses wildcard in numeric columns as any', () => {
+      const result = parseMarkdown(`# decision_table T
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| x | int_range | 0..100 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| y | enum |
+
+## rules
+
+| x | → y |
+|---|-----|
+| - | a |
+`);
+
+      const dt = result.file.decisionTables[0];
+      expect(dt.rules[0].conditions.get('x')).toEqual({ kind: 'any' });
+    });
+  });
 });

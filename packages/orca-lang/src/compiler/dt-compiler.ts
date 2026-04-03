@@ -55,7 +55,7 @@ function generateTypeScriptType(type: string, values: string[]): string {
   if (type === 'enum') {
     return values.length > 0 ? values.map(v => `'${v}'`).join(' | ') : 'string';
   }
-  if (type === 'int_range') {
+  if (type === 'int_range' || type === 'decimal_range') {
     return 'number';
   }
   return 'string';
@@ -68,8 +68,10 @@ function generateConditionCheck(condName: string, condType: string, cell: CellVa
       return ''; // No condition needed
 
     case 'exact':
-      // For bool type, compare to boolean; for others, compare to string
       if (condType === 'bool') {
+        return `input.${condName} === ${cell.value}`;
+      }
+      if (condType === 'int_range' || condType === 'decimal_range') {
         return `input.${condName} === ${cell.value}`;
       }
       return `input.${condName} === '${cell.value}'`;
@@ -80,7 +82,7 @@ function generateConditionCheck(condName: string, condType: string, cell: CellVa
       }
       return `input.${condName} !== '${cell.value}'`;
 
-    case 'set':
+    case 'set': {
       const checks = cell.values.map(v => {
         if (condType === 'bool') {
           return `input.${condName} === ${v}`;
@@ -88,6 +90,16 @@ function generateConditionCheck(condName: string, condType: string, cell: CellVa
         return `input.${condName} === '${v}'`;
       }).join(' || ');
       return `(${checks})`;
+    }
+
+    case 'compare':
+      return `input.${condName} ${cell.op} ${cell.value}`;
+
+    case 'range': {
+      const lowCheck = cell.lowInc ? `input.${condName} >= ${cell.low}` : `input.${condName} > ${cell.low}`;
+      const highCheck = cell.highInc ? `input.${condName} <= ${cell.high}` : `input.${condName} < ${cell.high}`;
+      return `(${lowCheck} && ${highCheck})`;
+    }
 
     default:
       return '';
@@ -246,6 +258,7 @@ export function compileDecisionTableToJSON(dt: DecisionTableDef): string {
 function generatePythonType(type: string): string {
   if (type === 'bool') return 'bool';
   if (type === 'int_range') return 'int';
+  if (type === 'decimal_range') return 'float';
   return 'str';
 }
 
@@ -255,6 +268,7 @@ function generatePythonConditionCheck(condName: string, condType: string, cell: 
       return '';
     case 'exact':
       if (condType === 'bool') return `input.${condName} == ${cell.value}`;
+      if (condType === 'int_range' || condType === 'decimal_range') return `input.${condName} == ${cell.value}`;
       return `input.${condName} == '${cell.value}'`;
     case 'negated':
       if (condType === 'bool') return `input.${condName} != ${cell.value}`;
@@ -264,6 +278,13 @@ function generatePythonConditionCheck(condName: string, condType: string, cell: 
         condType === 'bool' ? `input.${condName} == ${v}` : `input.${condName} == '${v}'`
       ).join(' or ');
       return `(${checks})`;
+    }
+    case 'compare':
+      return `input.${condName} ${cell.op} ${cell.value}`;
+    case 'range': {
+      const lowCheck = cell.lowInc ? `input.${condName} >= ${cell.low}` : `input.${condName} > ${cell.low}`;
+      const highCheck = cell.highInc ? `input.${condName} <= ${cell.high}` : `input.${condName} < ${cell.high}`;
+      return `(${lowCheck} and ${highCheck})`;
     }
     default:
       return '';
@@ -352,6 +373,7 @@ export function compileDecisionTableToPython(dt: DecisionTableDef): string {
 function generateGoType(type: string): string {
   if (type === 'bool') return 'bool';
   if (type === 'int_range') return 'int';
+  if (type === 'decimal_range') return 'float64';
   return 'string';
 }
 
@@ -362,6 +384,7 @@ function generateGoConditionCheck(condName: string, condType: string, cell: Cell
       return '';
     case 'exact':
       if (condType === 'bool') return `input.${goField} == ${cell.value}`;
+      if (condType === 'int_range' || condType === 'decimal_range') return `input.${goField} == ${cell.value}`;
       return `input.${goField} == "${cell.value}"`;
     case 'negated':
       if (condType === 'bool') return `input.${goField} != ${cell.value}`;
@@ -371,6 +394,13 @@ function generateGoConditionCheck(condName: string, condType: string, cell: Cell
         condType === 'bool' ? `input.${goField} == ${v}` : `input.${goField} == "${v}"`
       ).join(' || ');
       return `(${checks})`;
+    }
+    case 'compare':
+      return `input.${goField} ${cell.op} ${cell.value}`;
+    case 'range': {
+      const lowCheck = cell.lowInc ? `input.${goField} >= ${cell.low}` : `input.${goField} > ${cell.low}`;
+      const highCheck = cell.highInc ? `input.${goField} <= ${cell.high}` : `input.${goField} < ${cell.high}`;
+      return `(${lowCheck} && ${highCheck})`;
     }
     default:
       return '';

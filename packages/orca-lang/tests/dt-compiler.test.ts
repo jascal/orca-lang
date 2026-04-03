@@ -3,6 +3,8 @@ import { parseMarkdown } from '../src/parser/markdown-parser.js';
 import {
   compileDecisionTableToTypeScript,
   compileDecisionTableToJSON,
+  compileDecisionTableToPython,
+  compileDecisionTableToGo,
 } from '../src/compiler/dt-compiler.js';
 
 describe('Decision Table Compiler', () => {
@@ -374,6 +376,83 @@ describe('Decision Table Compiler', () => {
       expect(json.actions[0].name).toBe('discount');
       expect(json.rules).toHaveLength(1);
       expect(json.policy).toBe('first-match');
+    });
+  });
+
+  describe('numeric range compilation', () => {
+    const numericSrc = `# decision_table RiskScore
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 0..1000 |
+| ratio | decimal_range | 0.0..1.0 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| tier | enum |
+
+## rules
+
+| score | ratio | → tier |
+|-------|-------|--------|
+| 750+ | <0.3 | low |
+| 600-749 | 0.3-0.5 | medium |
+| <600 | - | high |
+`;
+
+    it('TypeScript: emits >= for suffix-plus and range checks', () => {
+      const result = parseMarkdown(numericSrc);
+      const dt = result.file.decisionTables[0];
+      const output = compileDecisionTableToTypeScript(dt);
+
+      // score: number type
+      expect(output).toContain('score: number');
+      expect(output).toContain('ratio: number');
+
+      // Rule 1: score >= 750 && ratio < 0.3
+      expect(output).toContain('input.score >= 750');
+      expect(output).toContain('input.ratio < 0.3');
+
+      // Rule 2: range check (score >= 600 && score <= 749) && (ratio >= 0.3 && ratio <= 0.5)
+      expect(output).toContain('input.score >= 600');
+      expect(output).toContain('input.score <= 749');
+      expect(output).toContain('input.ratio >= 0.3');
+      expect(output).toContain('input.ratio <= 0.5');
+
+      // Rule 3: score < 600
+      expect(output).toContain('input.score < 600');
+    });
+
+    it('Python: emits correct comparison operators', () => {
+      const result = parseMarkdown(numericSrc);
+      const dt = result.file.decisionTables[0];
+      const output = compileDecisionTableToPython(dt);
+
+      expect(output).toContain('score: int');
+      expect(output).toContain('ratio: float');
+      expect(output).toContain('input.score >= 750');
+      expect(output).toContain('input.ratio < 0.3');
+      expect(output).toContain('input.score >= 600 and input.score <= 749');
+      expect(output).toContain('input.ratio >= 0.3 and input.ratio <= 0.5');
+      expect(output).toContain('input.score < 600');
+    });
+
+    it('Go: emits correct comparison operators', () => {
+      const result = parseMarkdown(numericSrc);
+      const dt = result.file.decisionTables[0];
+      const output = compileDecisionTableToGo(dt);
+
+      expect(output).toContain('Score int');
+      expect(output).toContain('Ratio float64');
+      expect(output).toContain('input.Score >= 750');
+      expect(output).toContain('input.Ratio < 0.3');
+      expect(output).toContain('input.Score >= 600 && input.Score <= 749');
+      expect(output).toContain('input.Ratio >= 0.3 && input.Ratio <= 0.5');
+      expect(output).toContain('input.Score < 600');
     });
   });
 });

@@ -81,9 +81,28 @@
 
 ---
 
-## RiskAssessment Decision Table
+# decision_table RiskAssessment
 
-The `assess_risk` action evaluates these rules (first-match policy):
+The `assess_risk` action evaluates these rules (first-match policy).
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| credit_score | int_range | 300..850 |
+| income | int_range | 0..500000 |
+| debt_ratio | decimal_range | 0.0..1.0 |
+| employment | enum | employed, self-employed, unemployed |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| risk_tier | enum | low, medium, high, very_high |
+| required_approvals | enum | 1, 2, 3 |
+| interest_rate_modifier | enum | 0.0, 0.5, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0 |
+
+## rules
 
 | credit_score | income | debt_ratio | employment | → risk_tier | → required_approvals | → interest_rate_modifier |
 |--------------|--------|------------|------------|-------------|----------------------|--------------------------|
@@ -91,30 +110,47 @@ The `assess_risk` action evaluates these rules (first-match policy):
 | 750+ | - | <0.3 | self-employed | low | 1 | 0.5 |
 | 700-749 | - | <0.3 | employed | low | 1 | 0.5 |
 | 700-749 | - | 0.3-0.4 | employed | medium | 2 | 1.5 |
-| 650-699 | 50k+ | <0.4 | employed | medium | 2 | 2.0 |
-| 650-699 | 50k+ | 0.4+ | employed | high | 2 | 3.0 |
+| 650-699 | 50000+ | <0.4 | employed | medium | 2 | 2.0 |
+| 650-699 | 50000+ | 0.4+ | employed | high | 2 | 3.0 |
 | 600-649 | - | <0.4 | employed | medium | 2 | 2.5 |
 | 600-649 | - | 0.4+ | - | high | 3 | 4.0 |
 | <600 | - | - | - | very_high | 3 | 5.0 |
-| - | <30k | 0.5+ | - | very_high | 3 | 5.0 |
+| - | <30000 | 0.5+ | - | very_high | 3 | 5.0 |
 | - | - | >0.5 | - | very_high | 3 | 5.0 |
 | - | - | - | unemployed | very_high | 3 | 5.0 |
 
 ---
 
-## DisbursementDecision Decision Table
+# decision_table DisbursementDecision
 
-The `process_disbursement` action evaluates these rules (first-match policy):
+The `process_disbursement` action evaluates these rules (first-match policy).
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| risk_tier | enum | low, medium, high |
+| loan_amount | int_range | 0..500000 |
+
+## actions
+
+| Name | Type | Values |
+|------|------|--------|
+| disbursement_method | enum | ach, wire |
+| loan_terms | enum | 12mo, 24mo, 36mo, 48mo, 60mo |
+| apr_modifier | enum | 0.0, 0.5, 1.0, 2.0, 2.5, 3.0, 3.5, 5.0, 6.0 |
+
+## rules
 
 | risk_tier | loan_amount | → disbursement_method | → loan_terms | → apr_modifier |
 |-----------|-------------|----------------------|---------------|----------------|
-| low | <10k | ach | 12mo | 0.0 |
-| low | 10k-50k | ach | 24mo | 0.0 |
-| low | 50k-100k | wire | 36mo | 0.5 |
-| low | >100k | wire | 48mo | 1.0 |
-| medium | <10k | ach | 24mo | 2.0 |
-| medium | 10k-50k | wire | 36mo | 2.5 |
-| medium | 50k-100k | wire | 48mo | 3.0 |
-| medium | >100k | wire | 60mo | 3.5 |
+| low | <10000 | ach | 12mo | 0.0 |
+| low | 10000-50000 | ach | 24mo | 0.0 |
+| low | 50000-100000 | wire | 36mo | 0.5 |
+| low | 100000+ | wire | 48mo | 1.0 |
+| medium | <10000 | ach | 24mo | 2.0 |
+| medium | 10000-50000 | wire | 36mo | 2.5 |
+| medium | 50000-100000 | wire | 48mo | 3.0 |
+| medium | 100000+ | wire | 60mo | 3.5 |
 | high | - | wire | 48mo | 5.0 |
-| high | >50k | wire | 60mo | 6.0 |
+| high | 50000+ | wire | 60mo | 6.0 |

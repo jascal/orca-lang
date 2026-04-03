@@ -503,7 +503,7 @@ describe('Decision Table Verifier', () => {
   });
 
   describe('large tables', () => {
-    it('int_range condition skips completeness with a clear message (not DT_INCOMPLETE)', () => {
+    it('int_range with full coverage and domain passes completeness', () => {
       const result = parseMarkdown(`# decision_table Test
 
 ## conditions
@@ -528,9 +528,36 @@ describe('Decision Table Verifier', () => {
       const dt = result.file.decisionTables[0];
       const verification = verifyDecisionTable(dt);
       expect(verification.errors.some(e => e.code === 'DT_INCOMPLETE')).toBe(false);
+      expect(verification.errors.some(e => e.code === 'DT_COMPLETENESS_SKIPPED')).toBe(false);
+    });
+
+    it('int_range without domain range gets DT_COMPLETENESS_SKIPPED', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | |
+
+## actions
+
+| Name | Type |
+|------|------|
+| tier | enum | low, high |
+
+## rules
+
+| score | → tier |
+|-------|--------|
+| <500 | low |
+| 500+ | high |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
       const skipped = verification.errors.find(e => e.code === 'DT_COMPLETENESS_SKIPPED');
       expect(skipped).toBeDefined();
-      expect(skipped!.message).toContain('int_range');
+      expect(skipped!.message).toContain('no domain range declared');
     });
 
     it('large table (> 4096 combinations) gets DT_COMPLETENESS_SKIPPED warning', () => {
@@ -1416,6 +1443,176 @@ ${rules}
         expect(domain!.get('result')).toEqual(new Set(['a', 'b']));
         expect(domain!.get('flag')).toEqual(new Set(['false', 'true']));
       });
+    });
+  });
+
+  describe('numeric range completeness', () => {
+    it('detects gap in int_range coverage', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 0..100 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| grade | enum |
+
+## rules
+
+| score | → grade |
+|-------|---------|
+| 0..49 | F |
+| 70..100 | A |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      const gaps = verification.errors.filter(e => e.code === 'DT_INCOMPLETE');
+      expect(gaps.length).toBe(1);
+      expect(gaps[0].message).toContain('49');
+      expect(gaps[0].message).toContain('70');
+    });
+
+    it('decimal_range with compare operators covers domain', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| ratio | decimal_range | 0.0..1.0 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| level | enum |
+
+## rules
+
+| ratio | → level |
+|-------|---------|
+| <0.5 | low |
+| 0.5+ | high |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      expect(verification.errors.some(e => e.code === 'DT_INCOMPLETE')).toBe(false);
+    });
+
+    it('detects gap in decimal_range coverage', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| ratio | decimal_range | 0.0..1.0 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| level | enum |
+
+## rules
+
+| ratio | → level |
+|-------|---------|
+| <0.3 | low |
+| 0.7+ | high |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      const gaps = verification.errors.filter(e => e.code === 'DT_INCOMPLETE');
+      expect(gaps.length).toBe(1);
+      expect(gaps[0].message).toContain('0.3');
+      expect(gaps[0].message).toContain('0.7');
+    });
+
+    it('overlapping numeric rules are detected as inconsistent', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 0..100 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| grade | enum |
+
+## rules
+
+| score | → grade |
+|-------|---------|
+| 0..60 | F |
+| 50..100 | A |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      expect(verification.errors.some(e => e.code === 'DT_INCONSISTENT')).toBe(true);
+    });
+
+    it('wildcard rule covers entire numeric domain', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 0..100 |
+
+## actions
+
+| Name | Type |
+|------|------|
+| grade | enum |
+
+## rules
+
+| score | → grade |
+|-------|---------|
+| - | pass |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      expect(verification.errors.some(e => e.code === 'DT_INCOMPLETE')).toBe(false);
+    });
+
+    it('mixed enum + numeric conditions checks both axes', () => {
+      const result = parseMarkdown(`# decision_table Test
+
+## conditions
+
+| Name | Type | Values |
+|------|------|--------|
+| score | int_range | 0..100 |
+| status | enum | active, inactive |
+
+## actions
+
+| Name | Type |
+|------|------|
+| result | enum |
+
+## rules
+
+| score | status | → result |
+|-------|--------|----------|
+| 0..100 | active | pass |
+| 0..100 | inactive | fail |
+`);
+      const dt = result.file.decisionTables[0];
+      const verification = verifyDecisionTable(dt);
+      expect(verification.errors.some(e => e.code === 'DT_INCOMPLETE')).toBe(false);
     });
   });
 });
