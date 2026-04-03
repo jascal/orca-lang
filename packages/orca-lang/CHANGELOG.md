@@ -1,5 +1,11 @@
 # @orcalang/orca-lang
 
+## 0.1.23
+
+### Patch Changes
+
+- Bump @orcalang/orca-lang
+
 ## 0.1.22
 
 ### Patch Changes

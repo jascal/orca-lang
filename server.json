@@ -3,7 +3,7 @@
   "name": "io.github.jascal/orca-mcp-server",
   "title": "Orca MCP Server",
   "description": "Go from natural language to verified finite state machines — topology bugs caught before code runs.",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "repository": {
     "url": "https://github.com/jascal/orca-lang",
     "source": "github",
@@ -14,7 +14,7 @@
     {
       "registryType": "npm",
       "identifier": "@orcalang/orca-mcp-server",
-      "version": "0.1.22",
+      "version": "0.1.23",
       "transport": {
         "type": "stdio"
       },
