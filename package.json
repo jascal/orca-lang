@@ -19,6 +19,10 @@
     "build:demo-go:loan": "cd packages/demo-go && go build -o loan ./cmd/loan",
     "test:demo-go": "cd packages/demo-go && ./trip",
     "run:demo-go:loan": "cd packages/demo-go && ./loan",
+    "setup:rust": "cd packages/runtime-rust && cargo build --release",
+    "test:rust": "cd packages/runtime-rust && cargo test",
+    "build:demo-fortran": "cd packages/demo-fortran && make build-rust && make",
+    "test:demo-fortran": "cd packages/demo-fortran && make run",
     "health-check": "cd packages/orca-lang && pnpm run health-check",
     "clean": "pnpm -r exec rm -rf dist"
   },

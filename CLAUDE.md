@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Orca (Orchestrated State Machine Language)** - A two-layer architecture for LLM code generation that separates program topology (state machine structure) from computation (action functions).
 
-This is a **pnpm monorepo** containing the core language, runtimes (TypeScript, Python, and planned Go), and demo applications.
+This is a **pnpm monorepo** containing the core language, runtimes (TypeScript, Python, Go, and Rust), and demo applications.
 
 ## Monorepo Structure
 
@@ -16,9 +16,11 @@ packages/
   runtime-ts/      TypeScript async runtime: event bus, OrcaMachine, effect router
   runtime-python/  Python async runtime: event bus, OrcaMachine, effect handlers
   runtime-go/      Go runtime: goroutine-based event bus, OrcaMachine, effect handlers
+  runtime-rust/    Rust runtime with C FFI: parser, verifier, executor, C ABI surface
   demo-ts/         Text adventure game demo (uses runtime-ts)
   demo-python/     Agent framework demo (uses runtime-python)
   demo-go/         Ride-hailing trip coordinator demo (uses runtime-go)
+  demo-fortran/    N-agent market simulation (Fortran FFI to runtime-rust)
   demo-nanolab/    nanoGPT training orchestrator demo (uses runtime-python)
 ```
 
@@ -34,6 +36,12 @@ pnpm run setup:python
 # Go packages (from repo root)
 pnpm run setup:go
 pnpm run build:demo-go
+
+# Rust runtime (from repo root)
+pnpm run setup:rust
+
+# Fortran demo (requires gfortran)
+pnpm run build:demo-fortran
 ```
 
 ## Commands
@@ -61,6 +69,12 @@ pnpm run test:demo-python
 # Run Go demos
 pnpm run test:demo-go          # Ride-hailing trip coordinator
 pnpm run run:demo-go:loan      # Loan Application Processor (Decision Table demo)
+
+# Run Rust runtime tests
+pnpm run test:rust
+
+# Run Fortran demo (requires gfortran)
+pnpm run test:demo-fortran
 
 # Run nanolab demo tests (machine parsing + pipeline logic, no torch required)
 pnpm run test:demo-nanolab
@@ -100,6 +114,12 @@ Standalone Python async runtime. Zero external dependencies. Async event bus, Or
 ### packages/runtime-go (orca-runtime-go)
 Standalone Go runtime. Zero external dependencies. Goroutine-based event bus, OrcaMachine struct, guard evaluation, action registration, timeout management, snapshot/restore, machine invocation parsing. Features: `## effects` section parsing (`EffectDef`), `OrcaMachine.Resume()`, `PersistenceAdapter` + `FilePersistence`, `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`MakeEntry()`. 16 tests.
 
+### packages/runtime-rust (orca-runtime-rust)
+Rust runtime with C-compatible FFI surface. Markdown parser (two-phase: structural → semantic), basic verifier (initial state, reachability, deadlock), synchronous state machine executor with guard evaluation and action dispatch via C function pointers. Produces `.dylib`/`.so`/`.a` for linking from C/Fortran callers. JSON-based event/state serialization over `const char*`. 29 tests.
+
+### packages/demo-fortran
+N-agent market simulation. 80 concurrent state machine agents (20 Producer, 50 Consumer, 10 Speculator) driven by a Fortran tick loop via Orca's C FFI. Fortran owns the scheduler — sends ticks, waits for completion, computes market price, broadcasts price signals. Emergent macro behavior (price equilibrium, speculative bubbles) from simple local rules. Requires `gfortran` and links against `runtime-rust`.
+
 ### packages/demo-ts (orca-demo-ts)
 Playable text adventure game. Interactive CLI, 8-state machine, world map with 4 locations, inventory system, score tracking, LLM narrative generation path. Showcases `## effects` parsing, `MultiSink` audit logging, `FilePersistence` snapshot/checkpoint, and `OrcaMachine.resume()`. Depends on `@orcalang/orca-runtime-ts` via pnpm workspace.
 
@@ -123,6 +143,7 @@ demo-ts      ──depends on──>  runtime-ts      (pnpm workspace:*)
 demo-python  ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
 demo-go      ──depends on──>  runtime-go      (go module dependency)
 demo-nanolab ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
+demo-fortran ──depends on──>  runtime-rust    (Makefile links against liborca_runtime_rust)
 ```
 
 The orca-lang package is independent — runtimes implement their own parsers and can operate without it.
@@ -141,7 +162,7 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 - Feature parity ported from runtime-python to runtime-ts and runtime-go: `## effects` section parsing (`EffectDef`), `OrcaMachine.resume()` / `Resume()`, `PersistenceAdapter` + `FilePersistence`, `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`makeEntry()`
 - Core language: `## effects` parsing in markdown parser, `EffectDef` in AST, round-trip in ast-to-markdown, `ORPHAN_EFFECT` + `UNDECLARED_EFFECT` verifier warnings, `Effect` column support in actions table
 - Design doc: `docs/demo-ride-hailing.md`
-- **Test counts**: 135 orca-lang tests, 63 runtime-ts tests, 69 runtime-python tests, 16 runtime-go tests, 47 demo-nanolab tests
+- **Test counts**: 135 orca-lang tests, 63 runtime-ts tests, 69 runtime-python tests, 16 runtime-go tests, 29 runtime-rust tests, 47 demo-nanolab tests
 
 **Phase 5 (nanolab) Complete**: demo-nanolab — all 8 phases shipped. 5-machine orchestrator (TrainingLab, DataPipeline, HyperSearch with parallel regions, TrainingRun, Evaluator). Framework features driven by this demo: `## effects` section in Python parser (`EffectDef`), pluggable `PersistenceAdapter` + `FilePersistence` + `OrcaMachine.resume()`, `LogSink` protocol + `FileSink`/`ConsoleSink`/`MultiSink`. Rich terminal display (Phase 7). LLM workflow refinement via Claude API (Phase 8 — `nanolab.refine`, `--refine` flag). 47 tests (no torch required). Design doc: `docs/demo-nanolab.md`.
 
@@ -149,6 +170,11 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 - **demo-python Order Fulfillment** (`pnpm run test:demo-python`): 6-state workflow + DT at `routed` state for shipping/warehouse/fraud routing — demonstrates SM + DT for conditional routing
 - **demo-ts Support Ticket Escalation** (`pnpm run run:demo-ts:ticket`): 8-state workflow + 2 DTs (triaging + routing) — demonstrates multiple DTs per workflow, first-match policy
 - **demo-go Loan Application Processor** (`pnpm run run:demo-go:loan`): 6-state workflow + 2 DTs (risk assessment + disbursement) — demonstrates `int_range` numeric conditions, enum conditions, bool conditions
+
+**Phase 4.6 — Rust Runtime + Fortran FFI** ✅ Complete: Rust-based Orca runtime with C-compatible FFI, enabling Fortran callers to instantiate and drive state machines.
+- `runtime-rust/`: Markdown parser (two-phase), basic verifier, synchronous executor, guard evaluation, C function pointer action callbacks, full FFI surface (`orca_init`, `orca_send`, `orca_wait`, `orca_state`, `orca_register_action`, etc.). 29 tests.
+- `demo-fortran/`: 80-agent market simulation (20 Producer, 50 Consumer, 10 Speculator). Fortran owns the tick loop, Rust handles state machines. 100-tick simulation with emergent price dynamics. Requires `gfortran`.
+- Design doc: `docs/runtime-rust-fortran.md`
 
 **Dogfood Health Check**: Orca dogfoods itself via `pnpm health-check` — runs all builds, tests, and demos sequentially (~22s). State machine definition at `packages/orca-lang/examples/health-check.orca.md`, TypeScript runner at `packages/orca-lang/src/health-check.ts`.
 

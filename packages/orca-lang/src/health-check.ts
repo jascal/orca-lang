@@ -186,6 +186,51 @@ async function runHealthCheck(): Promise<HealthReport> {
     }
   }
 
+  // ── Step 7: runtime-rust tests ──────────────────────────────────
+  {
+    const step: StepResult = { name: 'runtime-rust:test', status: 'pending', output: '', duration: 0 };
+    const start = Date.now();
+    console.log('━━━ Running runtime-rust tests ━━━');
+    const result = runCommand('cd packages/runtime-rust && cargo test 2>&1', REPO_ROOT);
+    step.duration = Date.now() - start;
+    step.status = result.status === 0 ? 'success' : 'failed';
+    step.output = result.status === 0 ? 'Tests passed' : result.stdout;
+    report.steps.push(step);
+    console.log(`  ${step.status === 'success' ? '✓' : '✗'} runtime-rust tests ${step.status} (${step.duration}ms)\n`);
+    if (step.status === 'failed') {
+      report.endTime = Date.now();
+      return report;
+    }
+  }
+
+  // ── Step 7b: demo-fortran ─────────────────────────────────────
+  {
+    const step: StepResult = { name: 'demo-fortran', status: 'pending', output: '', duration: 0 };
+    const start = Date.now();
+
+    // Check if gfortran is available
+    const gfortranCheck = runCommand('which gfortran 2>/dev/null', REPO_ROOT);
+    if (gfortranCheck.status !== 0) {
+      step.duration = Date.now() - start;
+      step.status = 'success';
+      step.output = 'Skipped (gfortran not installed)';
+      report.steps.push(step);
+      console.log(`  ○ demo-fortran skipped (gfortran not installed) (${step.duration}ms)\n`);
+    } else {
+      console.log('━━━ Building and running demo-fortran ━━━');
+      const result = runCommand('cd packages/demo-fortran && make run 2>&1', REPO_ROOT);
+      step.duration = Date.now() - start;
+      step.status = result.status === 0 ? 'success' : 'failed';
+      step.output = result.status === 0 ? 'Demo passed' : result.stdout;
+      report.steps.push(step);
+      console.log(`  ${step.status === 'success' ? '✓' : '✗'} demo-fortran ${step.status} (${step.duration}ms)\n`);
+      if (step.status === 'failed') {
+        report.endTime = Date.now();
+        return report;
+      }
+    }
+  }
+
   // ── Step 8: demo-nanolab tests ─────────────────────────────────
   {
     const step: StepResult = { name: 'demo-nanolab:test', status: 'pending', output: '', duration: 0 };
