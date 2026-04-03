@@ -21,6 +21,7 @@ packages/
   demo-python/     Agent framework demo (uses runtime-python)
   demo-go/         Ride-hailing trip coordinator demo (uses runtime-go)
   demo-fortran/    N-agent market simulation (Fortran FFI to runtime-rust)
+  demo-rust/       Conway's Game of Life (native Rust, uses runtime-rust)
   demo-nanolab/    nanoGPT training orchestrator demo (uses runtime-python)
 ```
 
@@ -73,6 +74,12 @@ pnpm run run:demo-go:loan      # Loan Application Processor (Decision Table demo
 # Run Rust runtime tests
 pnpm run test:rust
 
+# Run Rust demo (Conway's Game of Life)
+pnpm run build:demo-rust
+pnpm run test:demo-rust            # Unit tests (blinker, block, glider, etc.)
+pnpm run run:demo-rust             # Interactive terminal UI (default: Gosper Gun)
+pnpm run run:demo-rust:help        # Show patterns and controls
+
 # Run Fortran demo (requires gfortran)
 pnpm run test:demo-fortran
 
@@ -117,6 +124,9 @@ Standalone Go runtime. Zero external dependencies. Goroutine-based event bus, Or
 ### packages/runtime-rust (orca-runtime-rust)
 Rust runtime with C-compatible FFI surface. Markdown parser (two-phase: structural → semantic), basic verifier (initial state, reachability, deadlock), synchronous state machine executor with guard evaluation and action dispatch via C function pointers. Produces `.dylib`/`.so`/`.a` for linking from C/Fortran callers. JSON-based event/state serialization over `const char*`. 29 tests.
 
+### packages/demo-rust (orca-demo-rust)
+Conway's Game of Life. Every cell in the grid is an independent Orca state machine (`cell.orca.md`: states `dead`/`alive`, guard-based transitions encoding Conway's rules). Two-phase evolution protocol: `count` event stores neighbor count in context, then `evolve` event triggers guard evaluation (`neighbors == 2`, `neighbors == 3`, `else`) for state transitions. Half-block Unicode rendering (`U+2580`) for double vertical resolution, age-based color gradients (bright cyan -> dark green), death flash effects. 7 classic patterns (Gosper Glider Gun, Pulsar, R-pentomino, Acorn, LWSS, Glider, Random). Keyboard controls for pause, step, reset, pattern switching, speed. Depends on `orca-runtime-rust` as a native Rust library. 7 tests.
+
 ### packages/demo-fortran
 N-agent market simulation. 80 concurrent state machine agents (20 Producer, 50 Consumer, 10 Speculator) driven by a Fortran tick loop via Orca's C FFI. Fortran owns the scheduler — sends ticks, waits for completion, computes market price, broadcasts price signals. Emergent macro behavior (price equilibrium, speculative bubbles) from simple local rules. Requires `gfortran` and links against `runtime-rust`.
 
@@ -143,6 +153,7 @@ demo-ts      ──depends on──>  runtime-ts      (pnpm workspace:*)
 demo-python  ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
 demo-go      ──depends on──>  runtime-go      (go module dependency)
 demo-nanolab ──depends on──>  runtime-python  (pip install -e, declared in pyproject.toml)
+demo-rust    ──depends on──>  runtime-rust    (Cargo path dependency)
 demo-fortran ──depends on──>  runtime-rust    (Makefile links against liborca_runtime_rust)
 ```
 
@@ -162,7 +173,7 @@ See `packages/orca-lang/CLAUDE.md` for detailed per-phase status.
 - Feature parity ported from runtime-python to runtime-ts and runtime-go: `## effects` section parsing (`EffectDef`), `OrcaMachine.resume()` / `Resume()`, `PersistenceAdapter` + `FilePersistence`, `LogSink` + `FileSink`/`ConsoleSink`/`MultiSink`/`makeEntry()`
 - Core language: `## effects` parsing in markdown parser, `EffectDef` in AST, round-trip in ast-to-markdown, `ORPHAN_EFFECT` + `UNDECLARED_EFFECT` verifier warnings, `Effect` column support in actions table
 - Design doc: `docs/demo-ride-hailing.md`
-- **Test counts**: 135 orca-lang tests, 63 runtime-ts tests, 69 runtime-python tests, 16 runtime-go tests, 29 runtime-rust tests, 47 demo-nanolab tests
+- **Test counts**: 135 orca-lang tests, 63 runtime-ts tests, 69 runtime-python tests, 16 runtime-go tests, 29 runtime-rust tests, 7 demo-rust tests, 47 demo-nanolab tests
 
 **Phase 5 (nanolab) Complete**: demo-nanolab — all 8 phases shipped. 5-machine orchestrator (TrainingLab, DataPipeline, HyperSearch with parallel regions, TrainingRun, Evaluator). Framework features driven by this demo: `## effects` section in Python parser (`EffectDef`), pluggable `PersistenceAdapter` + `FilePersistence` + `OrcaMachine.resume()`, `LogSink` protocol + `FileSink`/`ConsoleSink`/`MultiSink`. Rich terminal display (Phase 7). LLM workflow refinement via Claude API (Phase 8 — `nanolab.refine`, `--refine` flag). 47 tests (no torch required). Design doc: `docs/demo-nanolab.md`.
 

@@ -23,6 +23,10 @@
     "test:rust": "cd packages/runtime-rust && cargo test",
     "build:demo-fortran": "cd packages/demo-fortran && make build-rust && make",
     "test:demo-fortran": "cd packages/demo-fortran && make run",
+    "build:demo-rust": "cd packages/demo-rust && cargo build --release",
+    "test:demo-rust": "cd packages/demo-rust && cargo test",
+    "run:demo-rust": "cd packages/demo-rust && cargo run --release",
+    "run:demo-rust:help": "cd packages/demo-rust && cargo run --release -- --help",
     "health-check": "cd packages/orca-lang && pnpm run health-check",
     "clean": "pnpm -r exec rm -rf dist"
   },
