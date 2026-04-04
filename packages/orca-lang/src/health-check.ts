@@ -231,6 +231,40 @@ async function runHealthCheck(): Promise<HealthReport> {
     }
   }
 
+  // ── Step 7c: demo-rust ─────────────────────────────────────────
+  {
+    const step: StepResult = { name: 'demo-rust', status: 'pending', output: '', duration: 0 };
+    const start = Date.now();
+    console.log('━━━ Running demo-rust tests ━━━');
+    const result = runCommand('cd packages/demo-rust && cargo test 2>&1', REPO_ROOT);
+    step.duration = Date.now() - start;
+    step.status = result.status === 0 ? 'success' : 'failed';
+    step.output = result.status === 0 ? 'Tests passed' : result.stdout;
+    report.steps.push(step);
+    console.log(`  ${step.status === 'success' ? '✓' : '✗'} demo-rust tests ${step.status} (${step.duration}ms)\n`);
+    if (step.status === 'failed') {
+      report.endTime = Date.now();
+      return report;
+    }
+  }
+
+  // ── Step 7d: demo-rust-event ───────────────────────────────────
+  {
+    const step: StepResult = { name: 'demo-rust-event', status: 'pending', output: '', duration: 0 };
+    const start = Date.now();
+    console.log('━━━ Running demo-rust-event ━━━');
+    const result = runCommand('cd packages/demo-rust-event && cargo run 2>&1', REPO_ROOT);
+    step.duration = Date.now() - start;
+    step.status = result.status === 0 ? 'success' : 'failed';
+    step.output = result.status === 0 ? 'Demo passed' : result.stdout;
+    report.steps.push(step);
+    console.log(`  ${step.status === 'success' ? '✓' : '✗'} demo-rust-event ${step.status} (${step.duration}ms)\n`);
+    if (step.status === 'failed') {
+      report.endTime = Date.now();
+      return report;
+    }
+  }
+
   // ── Step 8: demo-nanolab tests ─────────────────────────────────
   {
     const step: StepResult = { name: 'demo-nanolab:test', status: 'pending', output: '', duration: 0 };

@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
 /// Top-level machine definition parsed from .orca.md
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineDef {
     pub name: String,
     pub context: Value,
@@ -14,7 +15,7 @@ pub struct MachineDef {
 }
 
 /// A single flat state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateDef {
     pub name: String,
     pub is_initial: bool,
@@ -22,10 +23,11 @@ pub struct StateDef {
     pub description: Option<String>,
     pub on_entry: Option<String>,
     pub on_exit: Option<String>,
+    pub ignored_events: Vec<String>,
 }
 
 /// A transition between states
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transition {
     pub source: String,
     pub event: String,
@@ -35,14 +37,14 @@ pub struct Transition {
 }
 
 /// Action signature from ## actions table
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionSignature {
     pub name: String,
     pub signature: String,
 }
 
 /// Guard expression AST
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GuardExpression {
     True,
     False,
@@ -61,7 +63,7 @@ pub enum GuardExpression {
 }
 
 /// Comparison operator
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompareOp {
     Eq,
     Ne,
@@ -72,13 +74,13 @@ pub enum CompareOp {
 }
 
 /// Reference to a context variable (e.g., ctx.price -> path = ["price"])
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VariableRef {
     pub path: Vec<String>,
 }
 
 /// A literal value in a guard expression
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ValueRef {
     Str(String),
     Number(f64),
@@ -116,6 +118,10 @@ pub enum VerifyCode {
     InvalidTransitionTarget,
     UnreachableState,
     Deadlock,
+    /// Multiple unguarded transitions for the same (state, event) — non-deterministic.
+    NonDeterministic,
+    /// Guards on transitions for the same (state, event) may not cover all cases.
+    GuardExhaustiveness,
 }
 
 /// Warnings from verification (non-fatal)

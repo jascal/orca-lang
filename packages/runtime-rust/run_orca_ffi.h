@@ -26,6 +26,34 @@ int orca_init(
     orca_handle_t** handle_ptr
 );
 
+/* Initialize multiple Orca machines from a multi-machine .orca.md source
+ * (machines separated by ---).
+ * On success, writes array pointer to handles_ptr and count to count_ptr.
+ * Caller must free each handle with orca_free, then free the array with orca_free_multi. */
+int orca_init_multi(
+    const char* orca_md_source,
+    size_t source_len,
+    orca_handle_t*** handles_ptr,
+    size_t* count_ptr
+);
+
+/* Free the array returned by orca_init_multi (does NOT free individual handles).
+ * Call orca_free on each handle first, then call this to free the array itself. */
+void orca_free_multi(
+    orca_handle_t** handles,
+    size_t count
+);
+
+/* Initialize a single Orca machine by name from a multi-machine .orca.md source.
+ * Parses all machines, selects the one matching machine_name, verifies and starts it. */
+int orca_init_named(
+    const char* orca_md_source,
+    size_t source_len,
+    const char* machine_name,
+    size_t name_len,
+    orca_handle_t** handle_ptr
+);
+
 /* Free a machine handle and all associated resources. */
 void orca_free(orca_handle_t* handle);
 
@@ -80,17 +108,64 @@ int orca_register_action(
     orca_action_fn callback
 );
 
-/* Effect handler callback type. */
-typedef const char* (*orca_effect_fn)(
+/* Effect handler callback type.
+ * Takes effect name + input JSON, returns a JSON result string.
+ * Returned pointer is owned by callee — caller must not retain it. */
+typedef char* (*orca_effect_fn)(
     const char* effect_name,
     const char* input_json
 );
 
-/* Register an effect handler. No-op stub in v1. */
+/* Register an effect handler with the machine's effect registry. */
 int orca_register_effect(
     orca_handle_t* handle,
     const char* effect_name,
     orca_effect_fn handler_fn
+);
+
+/* Serialize the current machine state to a JSON snapshot string.
+ * Caller owns the returned string — free with orca_free_string. */
+char* orca_snapshot(orca_handle_t* handle);
+
+/* Restore machine state from a JSON snapshot string. */
+int orca_restore(
+    orca_handle_t* handle,
+    const char* snapshot_json,
+    size_t json_len
+);
+
+/* Free a string allocated by orca_snapshot. */
+void orca_free_string(char* s);
+
+/* Transition callback type.
+ * Called after every successful state transition.
+ * All strings are null-terminated and valid only for the duration of the call. */
+typedef void (*orca_transition_fn)(
+    const char* from_state,
+    const char* to_state,
+    const char* event
+);
+
+/* Register a transition callback (C function pointer).
+ * Called after every successful state transition with (from, to, event). */
+int orca_on_transition(
+    orca_handle_t* handle,
+    orca_transition_fn callback
+);
+
+/* Set a JSONL log file for audit logging of transitions.
+ * Creates parent directories and opens in append mode. */
+int orca_set_log_file(
+    orca_handle_t* handle,
+    const char* path,
+    size_t path_len
+);
+
+/* Set the run ID used in log entries. */
+int orca_set_run_id(
+    orca_handle_t* handle,
+    const char* id,
+    size_t id_len
 );
 
 /* Get the last error message (valid until next call on this handle). */

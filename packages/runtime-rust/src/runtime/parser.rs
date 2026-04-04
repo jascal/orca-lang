@@ -128,7 +128,60 @@ fn is_table_separator(line: &str) -> bool {
 
 pub fn parse_orca_md(source: &str) -> Result<MachineDef, ParseError> {
     let elements = parse_markdown_structure(source);
-    parse_machine_from_elements(&elements)
+    // If separators are present, return only the first machine
+    let chunks = split_on_separators(&elements);
+    if chunks.is_empty() {
+        return Err(ParseError {
+            message: "No machine content found".to_string(),
+        });
+    }
+    parse_machine_from_elements(&chunks[0])
+}
+
+/// Parse a multi-machine `.orca.md` source (machines separated by `---`).
+/// Returns a Vec of all parsed machines. If no separators are found,
+/// returns a vec with a single machine (backward compatible).
+pub fn parse_orca_md_multi(source: &str) -> Result<Vec<MachineDef>, ParseError> {
+    let elements = parse_markdown_structure(source);
+    let chunks = split_on_separators(&elements);
+
+    let mut machines = Vec::new();
+    for chunk in &chunks {
+        let machine = parse_machine_from_elements(chunk)?;
+        machines.push(machine);
+    }
+
+    if machines.is_empty() {
+        return Err(ParseError {
+            message: "No machine content found".to_string(),
+        });
+    }
+
+    Ok(machines)
+}
+
+/// Split a flat list of MdElements into chunks at Separator boundaries.
+/// Empty chunks (consecutive separators) are skipped.
+fn split_on_separators(elements: &[MdElement]) -> Vec<Vec<MdElement>> {
+    let mut chunks = Vec::new();
+    let mut current = Vec::new();
+
+    for element in elements {
+        if matches!(element, MdElement::Separator) {
+            if !current.is_empty() {
+                chunks.push(current);
+                current = Vec::new();
+            }
+        } else {
+            current.push(element.clone());
+        }
+    }
+
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+
+    chunks
 }
 
 fn parse_machine_from_elements(elements: &[MdElement]) -> Result<MachineDef, ParseError> {
@@ -168,6 +221,7 @@ fn parse_machine_from_elements(elements: &[MdElement]) -> Result<MachineDef, Par
                         description: None,
                         on_entry: None,
                         on_exit: None,
+                        ignored_events: Vec::new(),
                     });
                     current_section = Some("state".to_string());
                 } else {
@@ -196,7 +250,7 @@ fn parse_machine_from_elements(elements: &[MdElement]) -> Result<MachineDef, Par
                         }
                     }
                     Some("state") => {
-                        // State properties: on_entry:, on_exit:
+                        // State properties: on_entry:, on_exit:, ignore:
                         if let Some(state) = states.last_mut() {
                             for item in items {
                                 let item_trimmed = item.trim();
@@ -204,6 +258,13 @@ fn parse_machine_from_elements(elements: &[MdElement]) -> Result<MachineDef, Par
                                     state.on_entry = Some(v.trim().to_string());
                                 } else if let Some(v) = item_trimmed.strip_prefix("on_exit:") {
                                     state.on_exit = Some(v.trim().to_string());
+                                } else if let Some(v) = item_trimmed.strip_prefix("ignore:") {
+                                    let events: Vec<String> = v
+                                        .split(',')
+                                        .map(|e| e.trim().to_string())
+                                        .filter(|e| !e.is_empty())
+                                        .collect();
+                                    state.ignored_events.extend(events);
                                 }
                             }
                         }
@@ -346,9 +407,11 @@ fn parse_transitions_table(
         let guard = if guard_str.is_empty() {
             None
         } else {
-            // Auto-register inline guard expression
-            let expr = parse_guard_expression(&guard_str);
-            guards.insert(guard_str.clone(), expr);
+            // Auto-register inline guard expression only if not already defined
+            if !guards.contains_key(&guard_str) {
+                let expr = parse_guard_expression(&guard_str);
+                guards.insert(guard_str.clone(), expr);
+            }
             Some(guard_str)
         };
 
@@ -379,7 +442,7 @@ fn parse_guards_table(
             continue;
         }
         let expr = parse_guard_expression(&expr_str);
-        guards.insert(name, expr);
+        guards.insert(name.clone(), expr);
     }
 }
 
@@ -447,22 +510,42 @@ pub fn parse_guard_expression(s: &str) -> GuardExpression {
 }
 
 fn try_parse_binary_logic(s: &str) -> Option<GuardExpression> {
-    // Find " and " or " or " outside parentheses (simple: no paren handling for v1)
-    if let Some(idx) = find_logic_op(s, " and ") {
-        let left = parse_guard_expression(&s[..idx]);
-        let right = parse_guard_expression(&s[idx + 5..]);
+    // Find " and " or " or " at depth 0 (outside parentheses).
+    // 'and' binds tighter than 'or', so we check 'and' first.
+    if let Some(idx) = find_logic_op_at_depth_zero(s, " and ") {
+        let left = parse_guard_expression(s[..idx].trim());
+        let right = parse_guard_expression(s[idx + 5..].trim());
         return Some(GuardExpression::And(Box::new(left), Box::new(right)));
     }
-    if let Some(idx) = find_logic_op(s, " or ") {
-        let left = parse_guard_expression(&s[..idx]);
-        let right = parse_guard_expression(&s[idx + 4..]);
+    if let Some(idx) = find_logic_op_at_depth_zero(s, " or ") {
+        let left = parse_guard_expression(s[..idx].trim());
+        let right = parse_guard_expression(s[idx + 4..].trim());
         return Some(GuardExpression::Or(Box::new(left), Box::new(right)));
     }
     None
 }
 
-fn find_logic_op(s: &str, op: &str) -> Option<usize> {
-    s.find(op)
+/// Find an operator at depth 0 (not inside parentheses).
+/// Returns the first occurrence of `op` where parentheses nesting is zero.
+fn find_logic_op_at_depth_zero(s: &str, op: &str) -> Option<usize> {
+    let mut depth: usize = 0;
+    let op_bytes = op.as_bytes();
+    let s_bytes = s.as_bytes();
+
+    for i in 0..s_bytes.len() {
+        let ch = s_bytes[i];
+        if ch == b'(' {
+            depth += 1;
+        } else if ch == b')' {
+            depth = depth.saturating_sub(1);
+        } else if depth == 0 && i + op_bytes.len() <= s_bytes.len() {
+            let slice = &s_bytes[i..i + op_bytes.len()];
+            if slice == op_bytes {
+                return Some(i);
+            }
+        }
+    }
+    None
 }
 
 fn try_parse_comparison(s: &str) -> Option<GuardExpression> {
@@ -724,6 +807,34 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_guard_parenthesized() {
+        // Parenthesized subexpressions: (price > 5) and (inventory < 10)
+        let expr = parse_guard_expression("(price > 5) and (inventory < 10)");
+        match expr {
+            GuardExpression::And(left, right) => {
+                match *left {
+                    GuardExpression::Compare { op: CompareOp::Gt, .. } => {}
+                    other => panic!("Expected Compare(Gt), got {:?}", other),
+                }
+                match *right {
+                    GuardExpression::Compare { op: CompareOp::Lt, .. } => {}
+                    other => panic!("Expected Compare(Lt), got {:?}", other),
+                }
+            }
+            other => panic!("Expected And, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_guard_expression_false() {
+        let expr = parse_guard_expression("false");
+        match expr {
+            GuardExpression::False => {}
+            other => panic!("Expected False, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_parse_state_description() {
         let md = r#"# machine Test
 
@@ -756,5 +867,132 @@ mod tests {
         let machine = parse_orca_md(md).unwrap();
         assert_eq!(machine.states[0].on_entry.as_deref(), Some("setup"));
         assert_eq!(machine.states[0].on_exit.as_deref(), Some("teardown"));
+    }
+
+    // -- Ignored events parsing tests --
+
+    #[test]
+    fn test_parse_ignored_events() {
+        let md = r#"# machine Test
+
+## state idle [initial]
+- ignore: toggle, reset
+
+## state done [final]
+- ignore: *
+"#;
+        let machine = parse_orca_md(md).unwrap();
+        assert_eq!(machine.states[0].ignored_events, vec!["toggle", "reset"]);
+        assert_eq!(machine.states[1].ignored_events, vec!["*"]);
+    }
+
+    // -- Multi-machine parsing tests --
+
+    #[test]
+    fn test_parse_multi_two_machines() {
+        let md = r#"# machine Toggle
+
+## state off [initial]
+## state on
+
+## transitions
+| Source | Event  | Guard | Target | Action |
+|--------|--------|-------|--------|--------|
+| off    | toggle |       | on     |        |
+| on     | toggle |       | off    |        |
+
+---
+
+# machine Counter
+
+## state counting [initial]
+## state done [final]
+
+## transitions
+| Source   | Event | Guard | Target | Action |
+|----------|-------|-------|--------|--------|
+| counting | inc   |       | counting | increment |
+| counting | stop  |       | done   |        |
+
+## actions
+| Name      | Signature          |
+|-----------|--------------------|
+| increment | `(ctx) -> Context` |
+"#;
+        let machines = parse_orca_md_multi(md).unwrap();
+        assert_eq!(machines.len(), 2);
+        assert_eq!(machines[0].name, "Toggle");
+        assert_eq!(machines[0].states.len(), 2);
+        assert_eq!(machines[0].transitions.len(), 2);
+        assert_eq!(machines[1].name, "Counter");
+        assert_eq!(machines[1].states.len(), 2);
+        assert_eq!(machines[1].transitions.len(), 2);
+        assert_eq!(machines[1].actions.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_multi_three_machines() {
+        let md = r#"# machine A
+## state s1 [initial]
+
+---
+
+# machine B
+## state s2 [initial]
+
+---
+
+# machine C
+## state s3 [initial]
+## state s4 [final]
+"#;
+        let machines = parse_orca_md_multi(md).unwrap();
+        assert_eq!(machines.len(), 3);
+        assert_eq!(machines[0].name, "A");
+        assert_eq!(machines[1].name, "B");
+        assert_eq!(machines[2].name, "C");
+        assert_eq!(machines[2].states.len(), 2);
+        assert!(machines[2].states[1].is_final);
+    }
+
+    #[test]
+    fn test_parse_multi_single_machine_no_separator() {
+        let machines = parse_orca_md_multi(TOGGLE_MD).unwrap();
+        assert_eq!(machines.len(), 1);
+        assert_eq!(machines[0].name, "Toggle");
+        assert_eq!(machines[0].states.len(), 2);
+        assert_eq!(machines[0].transitions.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_multi_empty_chunks_skipped() {
+        let md = r#"# machine A
+## state s1 [initial]
+
+---
+
+---
+
+# machine B
+## state s2 [initial]
+"#;
+        let machines = parse_orca_md_multi(md).unwrap();
+        assert_eq!(machines.len(), 2);
+        assert_eq!(machines[0].name, "A");
+        assert_eq!(machines[1].name, "B");
+    }
+
+    #[test]
+    fn test_parse_orca_md_returns_first_when_multi() {
+        let md = r#"# machine First
+## state s1 [initial]
+
+---
+
+# machine Second
+## state s2 [initial]
+"#;
+        let machine = parse_orca_md(md).unwrap();
+        assert_eq!(machine.name, "First");
     }
 }

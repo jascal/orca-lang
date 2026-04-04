@@ -27,6 +27,9 @@
     "test:demo-rust": "cd packages/demo-rust && cargo test",
     "run:demo-rust": "cd packages/demo-rust && cargo run --release",
     "run:demo-rust:help": "cd packages/demo-rust && cargo run --release -- --help",
+    "test:demo-rust-event": "cd packages/demo-rust-event && cargo test",
+    "run:demo-rust-event": "cd packages/demo-rust-event && cargo run",
+    "run:demo-rust-event:resume": "cd packages/demo-rust-event && cargo run -- --resume",
     "health-check": "cd packages/orca-lang && pnpm run health-check",
     "clean": "pnpm -r exec rm -rf dist"
   },

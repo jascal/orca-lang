@@ -3,9 +3,14 @@ pub mod runtime;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::ptr;
 
-use runtime::executor::{ActionCallback, OrcaMachine};
-use runtime::parser::parse_orca_md;
+use runtime::executor::{ActionCallback, OrcaMachine, TransitionCallback};
+use runtime::logging::FileSink;
+use runtime::parser::{parse_orca_md, parse_orca_md_multi};
 use runtime::verifier::verify;
+use runtime::effects::EffectHandlerFn;
+
+// Re-exports for public API
+pub use runtime::persistence::{FilePersistence, PersistenceAdapter, Snapshot};
 
 // Error codes matching run_orca_ffi.h
 const ORCA_OK: c_int = 0;
@@ -65,6 +70,145 @@ pub unsafe extern "C" fn orca_init(
     };
 
     // Start
+    if let Err(_e) = machine.start() {
+        return ORCA_ERR_RUNTIME;
+    }
+
+    let handle = Box::new(OrcaHandle {
+        machine,
+        last_error: CString::default(),
+    });
+
+    *handle_ptr = Box::into_raw(handle);
+    ORCA_OK
+}
+
+/// Initialize multiple Orca machines from a multi-machine .orca.md source
+/// (machines separated by `---`).
+/// On success, writes array pointer to handles_ptr and count to count_ptr.
+/// Caller must free each handle with orca_free, then free the array with orca_free_multi.
+#[no_mangle]
+pub unsafe extern "C" fn orca_init_multi(
+    orca_md_source: *const c_char,
+    source_len: usize,
+    handles_ptr: *mut *mut *mut OrcaHandle,
+    count_ptr: *mut usize,
+) -> c_int {
+    if orca_md_source.is_null() || handles_ptr.is_null() || count_ptr.is_null() {
+        return ORCA_ERR_INVALID;
+    }
+
+    let source_bytes = std::slice::from_raw_parts(orca_md_source as *const u8, source_len);
+    let source_str = match std::str::from_utf8(source_bytes) {
+        Ok(s) => s,
+        Err(_) => return ORCA_ERR_INVALID,
+    };
+
+    let machine_defs = match parse_orca_md_multi(source_str) {
+        Ok(defs) => defs,
+        Err(_e) => return ORCA_ERR_PARSE,
+    };
+
+    let mut handle_vec: Vec<*mut OrcaHandle> = Vec::with_capacity(machine_defs.len());
+
+    for def in machine_defs {
+        if let Err(_e) = verify(&def) {
+            for h in &handle_vec {
+                drop(Box::from_raw(*h));
+            }
+            return ORCA_ERR_VERIFY;
+        }
+
+        let mut machine = match OrcaMachine::new(def) {
+            Ok(m) => m,
+            Err(_e) => {
+                for h in &handle_vec {
+                    drop(Box::from_raw(*h));
+                }
+                return ORCA_ERR_RUNTIME;
+            }
+        };
+
+        if let Err(_e) = machine.start() {
+            for h in &handle_vec {
+                drop(Box::from_raw(*h));
+            }
+            return ORCA_ERR_RUNTIME;
+        }
+
+        let handle = Box::new(OrcaHandle {
+            machine,
+            last_error: CString::default(),
+        });
+        handle_vec.push(Box::into_raw(handle));
+    }
+
+    let count = handle_vec.len();
+    let array = handle_vec.into_boxed_slice();
+    let array_ptr = Box::into_raw(array) as *mut *mut OrcaHandle;
+
+    *handles_ptr = array_ptr;
+    *count_ptr = count;
+    ORCA_OK
+}
+
+/// Free the array returned by orca_init_multi (does NOT free individual handles).
+/// Call orca_free on each handle first, then call this to free the array itself.
+#[no_mangle]
+pub unsafe extern "C" fn orca_free_multi(
+    handles: *mut *mut OrcaHandle,
+    count: usize,
+) {
+    if !handles.is_null() && count > 0 {
+        let _ = Box::from_raw(std::slice::from_raw_parts_mut(handles, count) as *mut [*mut OrcaHandle]);
+    }
+}
+
+/// Initialize a single Orca machine by name from a multi-machine .orca.md source.
+/// Parses all machines, selects the one matching machine_name, verifies and starts it.
+#[no_mangle]
+pub unsafe extern "C" fn orca_init_named(
+    orca_md_source: *const c_char,
+    source_len: usize,
+    machine_name: *const c_char,
+    name_len: usize,
+    handle_ptr: *mut *mut OrcaHandle,
+) -> c_int {
+    if orca_md_source.is_null() || machine_name.is_null() || handle_ptr.is_null() {
+        return ORCA_ERR_INVALID;
+    }
+
+    let source_bytes = std::slice::from_raw_parts(orca_md_source as *const u8, source_len);
+    let source_str = match std::str::from_utf8(source_bytes) {
+        Ok(s) => s,
+        Err(_) => return ORCA_ERR_INVALID,
+    };
+
+    let name_bytes = std::slice::from_raw_parts(machine_name as *const u8, name_len);
+    let name_str = match std::str::from_utf8(name_bytes) {
+        Ok(s) => s,
+        Err(_) => return ORCA_ERR_INVALID,
+    };
+
+    let machine_defs = match parse_orca_md_multi(source_str) {
+        Ok(defs) => defs,
+        Err(_e) => return ORCA_ERR_PARSE,
+    };
+
+    let machine_def = match machine_defs.into_iter().find(|d| d.name == name_str) {
+        Some(def) => def,
+        None => return ORCA_ERR_PARSE,
+    };
+
+    if let Err(_e) = verify(&machine_def) {
+        return ORCA_ERR_VERIFY;
+    }
+
+    let mut machine = match OrcaMachine::new(machine_def) {
+        Ok(m) => m,
+        Err(_e) => return ORCA_ERR_RUNTIME,
+    };
+
     if let Err(_e) = machine.start() {
         return ORCA_ERR_RUNTIME;
     }
@@ -209,17 +353,223 @@ pub unsafe extern "C" fn orca_register_action(
     ORCA_OK
 }
 
-/// Register an effect handler. No-op stub for v1.
+/// C-compatible transition callback type.
+/// Arguments: (from_state, to_state, event) — all null-terminated C strings.
+pub type TransitionCallbackC = unsafe extern "C" fn(
+    from_state: *const c_char,
+    to_state: *const c_char,
+    event: *const c_char,
+);
+
+/// Register a transition callback (C function pointer).
+/// Called after every successful state transition with (from_state, to_state, event).
+#[no_mangle]
+pub unsafe extern "C" fn orca_on_transition(
+    handle: *mut OrcaHandle,
+    callback: TransitionCallbackC,
+) -> c_int {
+    let h = match handle.as_mut() {
+        Some(h) => h,
+        None => return ORCA_ERR_INVALID,
+    };
+
+    let rust_callback: TransitionCallback = Box::new(move |from: &str, to: &str, event: &str| {
+        let from_c = CString::new(from).unwrap_or_default();
+        let to_c = CString::new(to).unwrap_or_default();
+        let event_c = CString::new(event).unwrap_or_default();
+        unsafe {
+            callback(from_c.as_ptr(), to_c.as_ptr(), event_c.as_ptr());
+        }
+    });
+
+    h.machine.on_transition(rust_callback);
+    ORCA_OK
+}
+
+/// Set a JSONL log file for audit logging of transitions.
+/// Creates parent directories and opens in append mode.
+#[no_mangle]
+pub unsafe extern "C" fn orca_set_log_file(
+    handle: *mut OrcaHandle,
+    path: *const c_char,
+    path_len: usize,
+) -> c_int {
+    let h = match handle.as_mut() {
+        Some(h) => h,
+        None => return ORCA_ERR_INVALID,
+    };
+
+    if path.is_null() {
+        h.set_error("path is null");
+        return ORCA_ERR_INVALID;
+    }
+
+    let path_bytes = std::slice::from_raw_parts(path as *const u8, path_len);
+    let path_str = match std::str::from_utf8(path_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            h.set_error("Invalid UTF-8 in path");
+            return ORCA_ERR_INVALID;
+        }
+    };
+
+    match FileSink::new(path_str) {
+        Ok(sink) => {
+            h.machine.set_log_sink(Box::new(sink));
+            ORCA_OK
+        }
+        Err(e) => {
+            h.set_error(&format!("Failed to open log file: {}", e));
+            ORCA_ERR_RUNTIME
+        }
+    }
+}
+
+/// Set the run ID used in log entries.
+#[no_mangle]
+pub unsafe extern "C" fn orca_set_run_id(
+    handle: *mut OrcaHandle,
+    id: *const c_char,
+    id_len: usize,
+) -> c_int {
+    let h = match handle.as_mut() {
+        Some(h) => h,
+        None => return ORCA_ERR_INVALID,
+    };
+
+    if id.is_null() {
+        h.set_error("id is null");
+        return ORCA_ERR_INVALID;
+    }
+
+    let id_bytes = std::slice::from_raw_parts(id as *const u8, id_len);
+    let id_str = match std::str::from_utf8(id_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            h.set_error("Invalid UTF-8 in run_id");
+            return ORCA_ERR_INVALID;
+        }
+    };
+
+    h.machine.set_run_id(id_str.to_string());
+    ORCA_OK
+}
+
+/// Register an effect handler with the machine's effect registry.
 #[no_mangle]
 pub unsafe extern "C" fn orca_register_effect(
     handle: *mut OrcaHandle,
-    _effect_name: *const c_char,
-    _handler_fn: *const (),
+    effect_name: *const c_char,
+    handler_fn: Option<EffectHandlerFn>,
 ) -> c_int {
-    if handle.is_null() {
+    let h = match handle.as_mut() {
+        Some(h) => h,
+        None => return ORCA_ERR_INVALID,
+    };
+
+    if effect_name.is_null() {
+        h.set_error("effect_name is null");
         return ORCA_ERR_INVALID;
     }
+
+    let handler_fn = match handler_fn {
+        Some(f) => f,
+        None => {
+            h.set_error("handler_fn is null");
+            return ORCA_ERR_INVALID;
+        }
+    };
+
+    let name = match CStr::from_ptr(effect_name).to_str() {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            h.set_error("Invalid UTF-8 in effect name");
+            return ORCA_ERR_INVALID;
+        }
+    };
+
+    // Wrap the C callback in a Rust closure
+    let name_for_cb = name.clone();
+    let handler = move |_effect_name: &str, payload: &serde_json::Value| {
+        let payload_json =
+            CString::new(serde_json::to_string(payload).unwrap_or_default())
+                .unwrap_or_default();
+        // Pass the effect name as the first argument to the C callback
+        let name_c = CString::new(name_for_cb.as_str()).unwrap_or_default();
+        let result_ptr = handler_fn(name_c.as_ptr(), payload_json.as_ptr());
+
+        if result_ptr.is_null() {
+            Ok(serde_json::Value::Null)
+        } else {
+            let result_cstr = unsafe { CStr::from_ptr(result_ptr) };
+            let result_str = result_cstr.to_str().unwrap_or("{}");
+            Ok(serde_json::from_str(result_str).unwrap_or(serde_json::Value::Null))
+        }
+    };
+
+    // Get or create the effect registry
+    let registry = h.machine.effect_registry_mut();
+    registry.register(name, Box::new(handler));
+
     ORCA_OK
+}
+
+/// Serialize the current machine state to a JSON snapshot string.
+/// Caller owns the returned string — must free with orca_free_string.
+#[no_mangle]
+pub unsafe extern "C" fn orca_snapshot(handle: *mut OrcaHandle) -> *mut c_char {
+    let h = match handle.as_mut() {
+        Some(h) => h,
+        None => return ptr::null_mut(),
+    };
+
+    match h.machine.snapshot() {
+        Ok(json) => CString::into_raw(CString::new(json).unwrap_or_default()),
+        Err(_) => ptr::null_mut(),
+    }
+}
+
+/// Restore machine state from a JSON snapshot string.
+#[no_mangle]
+pub unsafe extern "C" fn orca_restore(
+    handle: *mut OrcaHandle,
+    snapshot_json: *const c_char,
+    json_len: usize,
+) -> c_int {
+    let h = match handle.as_mut() {
+        Some(h) => h,
+        None => return ORCA_ERR_INVALID,
+    };
+
+    if snapshot_json.is_null() {
+        h.set_error("snapshot_json is null");
+        return ORCA_ERR_INVALID;
+    }
+
+    let json_bytes = std::slice::from_raw_parts(snapshot_json as *const u8, json_len);
+    let json_str = match std::str::from_utf8(json_bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            h.set_error("Invalid UTF-8 in snapshot JSON");
+            return ORCA_ERR_INVALID;
+        }
+    };
+
+    match h.machine.restore(json_str) {
+        Ok(()) => ORCA_OK,
+        Err(e) => {
+            h.set_error(&e);
+            ORCA_ERR_RUNTIME
+        }
+    }
+}
+
+/// Free a string allocated by orca_snapshot.
+#[no_mangle]
+pub unsafe extern "C" fn orca_free_string(s: *mut c_char) {
+    if !s.is_null() {
+        drop(CString::from_raw(s));
+    }
 }
 
 /// Get the last error message. Valid until next call on this handle.
@@ -476,5 +826,414 @@ mod tests {
         machine.send(r#"{"type":"tick"}"#).unwrap();
         // goods should still be 1 (hold is no-op)
         assert_eq!(machine.context()["goods"], 1);
+    }
+
+    // -- Multi-machine FFI tests --
+
+    const MULTI_MD: &str = r#"# machine Toggle
+## state off [initial]
+## state on
+## transitions
+| Source | Event  | Guard | Target | Action |
+|--------|--------|-------|--------|--------|
+| off    | toggle |       | on     |        |
+| on     | toggle |       | off    |        |
+
+---
+
+# machine Counter
+## state counting [initial]
+## state done [final]
+## transitions
+| Source   | Event | Guard | Target   | Action |
+|----------|-------|-------|----------|--------|
+| counting | inc   |       | counting |        |
+| counting | stop  |       | done     |        |
+"#;
+
+    #[test]
+    fn test_ffi_init_multi() {
+        unsafe {
+            let source = CString::new(MULTI_MD).unwrap();
+            let mut handles: *mut *mut OrcaHandle = ptr::null_mut();
+            let mut count: usize = 0;
+            let rc = orca_init_multi(
+                source.as_ptr(),
+                MULTI_MD.len(),
+                &mut handles,
+                &mut count,
+            );
+            assert_eq!(rc, ORCA_OK);
+            assert_eq!(count, 2);
+            assert!(!handles.is_null());
+
+            let h0 = *handles.add(0);
+            let mut buf = vec![0u8; 1024];
+            let mut actual: usize = 0;
+            orca_state(h0, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut actual);
+            let json_str = std::str::from_utf8(&buf[..actual]).unwrap();
+            let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+            assert_eq!(json["state"], "off");
+
+            let h1 = *handles.add(1);
+            orca_state(h1, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut actual);
+            let json_str = std::str::from_utf8(&buf[..actual]).unwrap();
+            let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+            assert_eq!(json["state"], "counting");
+
+            let toggle_evt = r#"{"type":"toggle"}"#;
+            let rc = orca_send(h0, toggle_evt.as_ptr() as *const c_char, toggle_evt.len());
+            assert_eq!(rc, ORCA_OK);
+
+            orca_state(h0, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut actual);
+            let json_str = std::str::from_utf8(&buf[..actual]).unwrap();
+            let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+            assert_eq!(json["state"], "on");
+
+            orca_free(h0);
+            orca_free(h1);
+            orca_free_multi(handles, count);
+        }
+    }
+
+    #[test]
+    fn test_ffi_init_named() {
+        unsafe {
+            let source = CString::new(MULTI_MD).unwrap();
+            let name = "Counter";
+            let mut handle: *mut OrcaHandle = ptr::null_mut();
+            let rc = orca_init_named(
+                source.as_ptr(),
+                MULTI_MD.len(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                &mut handle,
+            );
+            assert_eq!(rc, ORCA_OK);
+            assert!(!handle.is_null());
+
+            let mut buf = vec![0u8; 1024];
+            let mut actual: usize = 0;
+            orca_state(handle, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut actual);
+            let json_str = std::str::from_utf8(&buf[..actual]).unwrap();
+            let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+            assert_eq!(json["state"], "counting");
+
+            orca_free(handle);
+        }
+    }
+
+    #[test]
+    fn test_ffi_init_named_not_found() {
+        unsafe {
+            let source = CString::new(MULTI_MD).unwrap();
+            let name = "NonExistent";
+            let mut handle: *mut OrcaHandle = ptr::null_mut();
+            let rc = orca_init_named(
+                source.as_ptr(),
+                MULTI_MD.len(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                &mut handle,
+            );
+            assert_eq!(rc, ORCA_ERR_PARSE);
+            assert!(handle.is_null());
+        }
+    }
+
+    #[test]
+    fn test_ffi_init_named_toggle() {
+        unsafe {
+            let source = CString::new(MULTI_MD).unwrap();
+            let name = "Toggle";
+            let mut handle: *mut OrcaHandle = ptr::null_mut();
+            let rc = orca_init_named(
+                source.as_ptr(),
+                MULTI_MD.len(),
+                name.as_ptr() as *const c_char,
+                name.len(),
+                &mut handle,
+            );
+            assert_eq!(rc, ORCA_OK);
+            assert!(!handle.is_null());
+
+            let mut buf = vec![0u8; 1024];
+            let mut actual: usize = 0;
+            orca_state(handle, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut actual);
+            let json_str = std::str::from_utf8(&buf[..actual]).unwrap();
+            let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+            assert_eq!(json["state"], "off");
+
+            orca_free(handle);
+        }
+    }
+
+    // -- Snapshot / Restore FFI tests --
+
+    #[test]
+    fn test_ffi_action_callback_direct() {
+        // Direct test of the C callback
+        unsafe {
+            let ctx_json = CString::new(r#"{"count":5}"#).unwrap();
+            let event_json = CString::new(r#"{"type":"inc"}"#).unwrap();
+            let result = counter_increment_callback(ctx_json.as_ptr(), event_json.as_ptr());
+            assert!(!result.is_null());
+            let result_cstr = CStr::from_ptr(result);
+            let result_str = result_cstr.to_str().unwrap();
+            let result_val: serde_json::Value = serde_json::from_str(result_str).unwrap();
+            assert_eq!(result_val["count"], 6);
+        }
+    }
+
+    const COUNTER_MD: &str = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+
+## state running [initial]
+
+## transitions
+| Source  | Event | Guard | Target  | Action    |
+|---------|-------|-------|---------|-----------|
+| running | inc   |       | running | increment |
+"#;
+
+    #[test]
+    fn test_ffi_action_callback_via_machine() {
+        // Test the full path: init machine, register C callback, send event, check context
+        unsafe {
+            let source = CString::new(COUNTER_MD).unwrap();
+            let mut handle: *mut OrcaHandle = ptr::null_mut();
+            let rc = orca_init(source.as_ptr(), COUNTER_MD.len(), &mut handle);
+            assert_eq!(rc, ORCA_OK);
+
+            let action_name = CString::new("increment").unwrap();
+            let rc = orca_register_action(
+                handle,
+                action_name.as_ptr(),
+                counter_increment_callback,
+            );
+            assert_eq!(rc, ORCA_OK);
+
+            // Check state BEFORE send
+            let mut buf = vec![0u8; 256];
+            let mut actual: usize = 0;
+            orca_state(handle, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut actual);
+            let json_before: serde_json::Value =
+                serde_json::from_str(std::str::from_utf8(&buf[..actual]).unwrap()).unwrap();
+            assert_eq!(json_before["state"], "running");
+            assert_eq!(json_before["context"]["count"], 0);
+
+            // Note: CString includes null terminator in its length, so we use the
+            // string's byte length directly (12 bytes for '{"type":"inc"}')
+            let inc_str = r#"{"type":"inc"}"#;
+            let inc = CString::new(inc_str).unwrap();
+            let rc_send = orca_send(handle, inc.as_ptr(), inc_str.len());
+            if rc_send != ORCA_OK {
+                let err_ptr = orca_last_error(handle);
+                let err_str = CStr::from_ptr(err_ptr).to_string_lossy();
+                panic!("orca_send failed with {}: {}", rc_send, err_str);
+            }
+            assert_eq!(rc_send, ORCA_OK);
+
+            // Check state AFTER send
+            orca_state(handle, buf.as_mut_ptr() as *mut c_char, buf.len(), &mut actual);
+            let json_after: serde_json::Value =
+                serde_json::from_str(std::str::from_utf8(&buf[..actual]).unwrap()).unwrap();
+            assert_eq!(json_after["context"]["count"], 1, "count should be 1 after one inc");
+
+            orca_free(handle);
+        }
+    }
+
+    #[test]
+    fn test_ffi_snapshot_restore() {
+        unsafe {
+            // Create and advance machine to count=2
+            let source = CString::new(COUNTER_MD).unwrap();
+            let mut handle: *mut OrcaHandle = ptr::null_mut();
+            let rc = orca_init(source.as_ptr(), COUNTER_MD.len(), &mut handle);
+            assert_eq!(rc, ORCA_OK);
+
+            // Register action then advance
+            let action_name = CString::new("increment").unwrap();
+            let rc = orca_register_action(
+                handle,
+                action_name.as_ptr(),
+                counter_increment_callback,
+            );
+            assert_eq!(rc, ORCA_OK);
+
+            let inc = CString::new(r#"{"type":"inc"}"#).unwrap();
+            let inc_len = CStr::from_ptr(inc.as_ptr()).to_bytes().len();
+            orca_send(handle, inc.as_ptr(), inc_len);
+            orca_send(handle, inc.as_ptr(), inc_len);
+
+            // Snapshot
+            let snap_ptr = orca_snapshot(handle);
+            assert!(!snap_ptr.is_null());
+            let snap_cstr = CStr::from_ptr(snap_ptr);
+            let snap_bytes = snap_cstr.to_bytes();
+            eprintln!("snap raw bytes len = {}, content prefix = {:?}",
+                snap_bytes.len(),
+                &snap_bytes[..snap_bytes.len().min(50)]);
+            let snap_json: serde_json::Value =
+                serde_json::from_str(snap_cstr.to_str().unwrap()).unwrap();
+            assert_eq!(snap_json["state"], "running");
+            assert_eq!(snap_json["context"]["count"], 2);
+
+            // Create a second machine from same source
+            let mut handle2: *mut OrcaHandle = ptr::null_mut();
+            let rc2 = orca_init(source.as_ptr(), COUNTER_MD.len(), &mut handle2);
+            assert_eq!(rc2, ORCA_OK);
+            let rc_reg2 = orca_register_action(
+                handle2,
+                action_name.as_ptr(),
+                counter_increment_callback,
+            );
+            assert_eq!(rc_reg2, ORCA_OK);
+
+            // Advance the second machine to count=5
+            for _ in 0..5 {
+                orca_send(handle2, inc.as_ptr(), inc_len);
+            }
+            let mut buf2 = vec![0u8; 1024];
+            let mut actual2: usize = 0;
+            orca_state(
+                handle2,
+                buf2.as_mut_ptr() as *mut c_char,
+                buf2.len(),
+                &mut actual2,
+            );
+            let json_str2 = std::str::from_utf8(&buf2[..actual2]).unwrap();
+            let json2: serde_json::Value = serde_json::from_str(json_str2).unwrap();
+            assert_eq!(json2["context"]["count"], 5);
+
+            // Restore snapshot into handle2
+            // CStr::to_bytes() does NOT include the null terminator
+            let snap_bytes = snap_cstr.to_bytes();
+            let snap_len = snap_bytes.len();
+            let rc_restore = orca_restore(handle2, snap_ptr as *const c_char, snap_len);
+            if rc_restore != ORCA_OK {
+                let err_ptr = orca_last_error(handle2);
+                let err_str = CStr::from_ptr(err_ptr).to_string_lossy();
+                panic!("orca_restore failed with {}: {}", rc_restore, err_str);
+            }
+            assert_eq!(rc_restore, ORCA_OK);
+
+            // Now handle2 should be at count=2
+            orca_state(
+                handle2,
+                buf2.as_mut_ptr() as *mut c_char,
+                buf2.len(),
+                &mut actual2,
+            );
+            let json_str2b = std::str::from_utf8(&buf2[..actual2]).unwrap();
+            let json2b: serde_json::Value = serde_json::from_str(json_str2b).unwrap();
+            assert_eq!(json2b["context"]["count"], 2);
+            assert_eq!(json2b["state"], "running");
+
+            // Clean up
+            orca_free_string(snap_ptr);
+            orca_free(handle);
+            orca_free(handle2);
+        }
+    }
+
+    #[test]
+    fn test_ffi_snapshot_null_handle() {
+        unsafe {
+            let ptr = orca_snapshot(ptr::null_mut());
+            assert!(ptr.is_null());
+        }
+    }
+
+    #[test]
+    fn test_ffi_restore_null_handle() {
+        unsafe {
+            let json = CString::new(r#"{"state":"idle","context":{}}"#).unwrap();
+            let rc = orca_restore(ptr::null_mut(), json.as_ptr(), json.as_bytes().len());
+            assert_eq!(rc, ORCA_ERR_INVALID);
+        }
+    }
+
+    // -- Effect FFI tests --
+
+    #[test]
+    fn test_ffi_register_effect() {
+        unsafe {
+            let source = CString::new(COUNTER_MD).unwrap();
+            let mut handle: *mut OrcaHandle = ptr::null_mut();
+            let rc = orca_init(source.as_ptr(), COUNTER_MD.len(), &mut handle);
+            assert_eq!(rc, ORCA_OK);
+
+            // Register an effect that doubles the count
+            let effect_name = CString::new("increment").unwrap();
+            let rc = orca_register_effect(
+                handle,
+                effect_name.as_ptr(),
+                Some(double_effect_callback),
+            );
+            assert_eq!(rc, ORCA_OK);
+
+            // Send inc — should invoke the effect (count 0 -> 2)
+            let inc_str = r#"{"type":"inc"}"#;
+            let inc = CString::new(inc_str).unwrap();
+            orca_send(handle, inc.as_ptr(), inc_str.len());
+
+            let mut buf = vec![0u8; 1024];
+            let mut actual: usize = 0;
+            orca_state(
+                handle,
+                buf.as_mut_ptr() as *mut c_char,
+                buf.len(),
+                &mut actual,
+            );
+            let json_str = std::str::from_utf8(&buf[..actual]).unwrap();
+            let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+            // Effect doubled: 0 -> 2
+            assert_eq!(json["context"]["count"], 2);
+
+            orca_free(handle);
+        }
+    }
+
+    // C callback used by FFI action tests
+    // Returns a pointer to CString data. Caller must use CString::from_raw to reclaim.
+    unsafe extern "C" fn counter_increment_callback(
+        ctx_json: *const c_char,
+        _event_json: *const c_char,
+    ) -> *const c_char {
+        let ctx_str = CStr::from_ptr(ctx_json);
+        let ctx: serde_json::Value =
+            serde_json::from_str(ctx_str.to_str().unwrap_or("{}")).unwrap();
+        let count = ctx
+            .get("count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let result = serde_json::json!({"count": count + 1}).to_string();
+        let cstr = CString::new(result).unwrap();
+        // Cast mut to const — caller (execute_action) borrows via CStr::from_ptr,
+        // then the Box::from_raw + drop in execute_action will deallocate.
+        cstr.into_raw() as *const c_char
+    }
+
+    // C callback used by FFI effect tests — doubles the count
+    unsafe extern "C" fn double_effect_callback(
+        _effect_name: *const c_char,
+        payload_json: *const c_char,
+    ) -> *mut c_char {
+        let payload_str = CStr::from_ptr(payload_json);
+        let event: serde_json::Value =
+            serde_json::from_str(payload_str.to_str().unwrap_or("{}")).unwrap();
+        let count = event
+            .get("context")
+            .and_then(|v| v.get("count"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let result = serde_json::json!({"count": count + 2}).to_string();
+        let cstr = CString::new(result).unwrap();
+        cstr.into_raw()
     }
 }
