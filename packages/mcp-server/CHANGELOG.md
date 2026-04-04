@@ -1,5 +1,12 @@
 # @orcalang/orca-mcp-server
 
+## 0.1.24
+
+### Patch Changes
+
+- Updated dependencies
+  - @orcalang/orca-lang@0.1.24
+
 ## 0.1.23
 
 ### Patch Changes
