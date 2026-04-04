@@ -3,6 +3,9 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use serde_json::Value;
 use super::types::*;
+use super::logging::{LogSink, make_entry};
+use super::effects::EffectRegistry;
+use super::persistence::Snapshot;
 
 /// C-compatible action callback type
 pub type ActionCallback = unsafe extern "C" fn(
@@ -12,6 +15,10 @@ pub type ActionCallback = unsafe extern "C" fn(
 
 /// Internal Rust action handler (for testing without FFI)
 pub type RustActionHandler = Box<dyn Fn(&Value, &Value) -> Value>;
+
+/// Callback invoked after every successful transition.
+/// Arguments: (from_state, to_state, event)
+pub type TransitionCallback = Box<dyn Fn(&str, &str, &str) -> ()>;
 
 /// Action handler that can be either a C callback or a Rust closure
 enum ActionHandler {
@@ -26,6 +33,10 @@ pub struct OrcaMachine {
     state: String,
     active: bool,
     action_handlers: HashMap<String, ActionHandler>,
+    transition_callback: Option<TransitionCallback>,
+    log_sink: Option<Box<dyn LogSink>>,
+    effect_registry: Option<EffectRegistry>,
+    pub run_id: String,
 }
 
 impl OrcaMachine {
@@ -52,6 +63,10 @@ impl OrcaMachine {
             state,
             active: false,
             action_handlers: HashMap::new(),
+            transition_callback: None,
+            log_sink: None,
+            effect_registry: None,
+            run_id: String::new(),
         })
     }
 
@@ -80,6 +95,92 @@ impl OrcaMachine {
             .insert(name.to_string(), ActionHandler::Rust(handler));
     }
 
+    /// Register a callback that fires after every successful transition.
+    pub fn on_transition(&mut self, callback: TransitionCallback) {
+        self.transition_callback = Some(callback);
+    }
+
+    /// Set a log sink for audit logging of transitions.
+    pub fn set_log_sink(&mut self, sink: Box<dyn LogSink>) {
+        self.log_sink = Some(sink);
+    }
+
+    /// Set the run ID used in log entries.
+    pub fn set_run_id(&mut self, id: String) {
+        self.run_id = id;
+    }
+
+    /// Set the effect registry for handling side-effect actions.
+    pub fn set_effect_registry(&mut self, registry: EffectRegistry) {
+        self.effect_registry = Some(registry);
+    }
+
+    /// Get a mutable reference to the effect registry, creating it if absent.
+    pub fn effect_registry_mut(&mut self) -> &mut EffectRegistry {
+        self.effect_registry.get_or_insert_with(EffectRegistry::new)
+    }
+
+    /// Serialize the current machine state to a JSON string.
+    pub fn snapshot(&self) -> Result<String, String> {
+        let snap = Snapshot {
+            definition: self.definition.clone(),
+            state: self.state.clone(),
+            context: self.context.clone(),
+            run_id: self.run_id.clone(),
+            active: self.active,
+        };
+        serde_json::to_string(&snap)
+            .map_err(|e| format!("snapshot serialization failed: {}", e))
+    }
+
+    /// Restore machine state from a JSON snapshot string.
+    pub fn restore(&mut self, json: &str) -> Result<(), String> {
+        let snap: Snapshot = serde_json::from_str(json)
+            .map_err(|e| format!("snapshot deserialize failed: {}", e))?;
+
+        if snap.definition.name != self.definition.name {
+            return Err(format!(
+                "snapshot definition name '{}' does not match machine '{}'",
+                snap.definition.name, self.definition.name
+            ));
+        }
+
+        self.state = snap.state;
+        self.context = snap.context;
+        self.run_id = snap.run_id;
+        self.active = snap.active;
+
+        Ok(())
+    }
+
+    /// Resume the machine from a snapshot, cold-starting without re-running
+    /// on_entry actions. Use this instead of start() when resuming a crashed
+    /// run from a saved checkpoint.
+    ///
+    /// Unlike restore() (a live-machine primitive), resume() is the cold-start
+    /// path: the machine was inactive, a snapshot was found on disk, and we
+    /// want to continue from where we left off without re-executing the actions
+    /// that already ran before the crash.
+    pub fn resume(&mut self, snap: &Snapshot) -> Result<(), String> {
+        if self.active {
+            return Err("machine is already active".to_string());
+        }
+
+        if snap.definition.name != self.definition.name {
+            return Err(format!(
+                "snapshot definition name '{}' does not match machine '{}'",
+                snap.definition.name, self.definition.name
+            ));
+        }
+
+        self.state = snap.state.clone();
+        self.context = snap.context.clone();
+        self.run_id = snap.run_id.clone();
+        self.active = snap.active;
+
+        Ok(())
+    }
+
     /// Send an event to the machine. Synchronous — processes immediately.
     pub fn send(&mut self, event_json: &str) -> Result<(), OrcaError> {
         if !self.active {
@@ -100,6 +201,11 @@ impl OrcaMachine {
                 message: "Event must have a 'type' field".to_string(),
             })?
             .to_string();
+
+        // Check if the event is ignored for the current state
+        if self.is_event_ignored(&event_type) {
+            return Ok(());
+        }
 
         // Find all matching transitions (same source + event)
         let candidates: Vec<&Transition> = self
@@ -138,6 +244,9 @@ impl OrcaMachine {
         // Execute the transition
         let old_state = self.state.clone();
 
+        // Snapshot context before transition (for computing delta)
+        let ctx_before = self.context.clone();
+
         // 1. Execute on_exit for old state
         if let Some(action_name) = self.find_on_exit(&old_state) {
             self.execute_action(&action_name, &event)?;
@@ -151,6 +260,11 @@ impl OrcaMachine {
         // 3. Update state
         self.state = transition.target.clone();
 
+        // 3a. Fire transition callback
+        if let Some(ref callback) = self.transition_callback {
+            callback(&old_state, &self.state, &event_type);
+        }
+
         // 4. Execute on_entry for new state
         let new_state = self.state.clone();
         if let Some(action_name) = self.find_on_entry(&new_state) {
@@ -160,6 +274,20 @@ impl OrcaMachine {
         // 5. Check if we reached a final state
         if self.is_final_state(&self.state) {
             self.active = false;
+        }
+
+        // 6. Log the transition (don't fail the transition on log errors)
+        if let Some(ref mut sink) = self.log_sink {
+            let context_delta = compute_context_delta(&ctx_before, &self.context);
+            let entry = make_entry(
+                &self.run_id,
+                &self.definition.name,
+                &event_type,
+                &old_state,
+                &self.state,
+                context_delta,
+            );
+            let _ = sink.write(&entry);
         }
 
         Ok(())
@@ -199,6 +327,15 @@ impl OrcaMachine {
 
     // -- Internal helpers --
 
+    fn is_event_ignored(&self, event: &str) -> bool {
+        if let Some(state_def) = self.definition.states.iter().find(|s| s.name == self.state) {
+            if state_def.ignored_events.iter().any(|e| e == event || e == "*") {
+                return true;
+            }
+        }
+        false
+    }
+
     fn evaluate_guard(&self, expr: &GuardExpression) -> bool {
         match expr {
             GuardExpression::True => true,
@@ -234,6 +371,35 @@ impl OrcaMachine {
     }
 
     fn execute_action(&mut self, action_name: &str, event: &Value) -> Result<(), OrcaError> {
+        // Check effect registry first — registered effects take precedence
+        if let Some(ref registry) = self.effect_registry {
+            if registry.has_effect(action_name) {
+                // Pass event + current context so effect handlers can read state
+                let payload = serde_json::json!({
+                    "event": event,
+                    "context": self.context,
+                });
+                match registry.invoke(action_name, &payload) {
+                    Ok(result_value) => {
+                        // Merge result into context (shallow merge of top-level keys)
+                        if let Value::Object(delta) = result_value {
+                            if let Value::Object(ref mut ctx) = self.context {
+                                for (k, v) in delta {
+                                    ctx.insert(k, v);
+                                }
+                            }
+                        }
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        return Err(OrcaError {
+                            message: format!("effect '{}' failed: {}", action_name, e),
+                        });
+                    }
+                }
+            }
+        }
+
         let handler = match self.action_handlers.get(action_name) {
             Some(h) => h,
             None => return Ok(()), // No handler registered — silently succeed
@@ -297,6 +463,22 @@ impl OrcaMachine {
             .iter()
             .any(|s| s.name == state_name && s.is_final)
     }
+}
+
+/// Compute the context delta: keys whose values changed between before and after.
+fn compute_context_delta(before: &Value, after: &Value) -> HashMap<String, Value> {
+    let mut delta = HashMap::new();
+    if let (Value::Object(b), Value::Object(a)) = (before, after) {
+        for (key, new_val) in a {
+            match b.get(key) {
+                Some(old_val) if old_val == new_val => {} // unchanged
+                _ => {
+                    delta.insert(key.clone(), new_val.clone());
+                }
+            }
+        }
+    }
+    delta
 }
 
 fn compare_values(ctx_val: &Value, right: &ValueRef, op: CompareOp) -> bool {
@@ -368,6 +550,7 @@ fn value_ref_as_string(v: &ValueRef) -> String {
 mod tests {
     use super::*;
     use crate::runtime::parser::parse_orca_md;
+    use crate::runtime::logging::{LogEntry, LogSink};
 
     fn make_toggle() -> MachineDef {
         parse_orca_md(
@@ -550,5 +733,518 @@ mod tests {
         // Sending an event with no matching transition should succeed silently
         machine.send(r#"{"type":"unknown_event"}"#).unwrap();
         assert_eq!(machine.state(), "off");
+    }
+
+    // -- Ignored events tests --
+
+    #[test]
+    fn test_ignored_event_single() {
+        let md = r#"# machine IgnoreTest
+## state idle [initial]
+- ignore: toggle
+
+## state done [final]
+
+## transitions
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| idle   | toggle |      | done   |        |
+| idle   | go     |      | done   |        |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.start().unwrap();
+
+        // toggle is ignored — should NOT transition
+        machine.send(r#"{"type":"toggle"}"#).unwrap();
+        assert_eq!(machine.state(), "idle");
+
+        // go is NOT ignored — should transition
+        machine.send(r#"{"type":"go"}"#).unwrap();
+        assert_eq!(machine.state(), "done");
+    }
+
+    #[test]
+    fn test_ignored_event_wildcard() {
+        let md = r#"# machine WildcardIgnore
+## state idle [initial]
+- ignore: *
+
+## state done [final]
+
+## transitions
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| idle   | toggle |      | done   |        |
+| idle   | go     |      | done   |        |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.start().unwrap();
+
+        machine.send(r#"{"type":"toggle"}"#).unwrap();
+        assert_eq!(machine.state(), "idle");
+
+        machine.send(r#"{"type":"go"}"#).unwrap();
+        assert_eq!(machine.state(), "idle");
+    }
+
+    #[test]
+    fn test_ignored_event_still_allows_other_events() {
+        let md = r#"# machine SelectiveIgnore
+## state idle [initial]
+- ignore: toggle, reset
+
+## state done [final]
+
+## transitions
+| Source | Event  | Guard | Target | Action |
+|--------|--------|-------|--------|--------|
+| idle   | toggle |       | done   |        |
+| idle   | reset  |       | done   |        |
+| idle   | go     |       | done   |        |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.start().unwrap();
+
+        machine.send(r#"{"type":"toggle"}"#).unwrap();
+        assert_eq!(machine.state(), "idle");
+        machine.send(r#"{"type":"reset"}"#).unwrap();
+        assert_eq!(machine.state(), "idle");
+
+        machine.send(r#"{"type":"go"}"#).unwrap();
+        assert_eq!(machine.state(), "done");
+    }
+
+    // -- Transition callback tests --
+
+    #[test]
+    fn test_transition_callback_fires() {
+        use std::sync::{Arc, Mutex};
+
+        let mut machine = OrcaMachine::new(make_toggle()).unwrap();
+        let log: Arc<Mutex<Vec<(String, String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_clone = log.clone();
+
+        machine.on_transition(Box::new(move |from, to, event| {
+            log_clone.lock().unwrap().push((
+                from.to_string(),
+                to.to_string(),
+                event.to_string(),
+            ));
+        }));
+        machine.start().unwrap();
+
+        machine.send(r#"{"type":"toggle"}"#).unwrap();
+        machine.send(r#"{"type":"toggle"}"#).unwrap();
+
+        let entries = log.lock().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0], ("off".to_string(), "on".to_string(), "toggle".to_string()));
+        assert_eq!(entries[1], ("on".to_string(), "off".to_string(), "toggle".to_string()));
+    }
+
+    #[test]
+    fn test_transition_callback_not_called_on_ignored() {
+        use std::sync::{Arc, Mutex};
+
+        let md = r#"# machine IgnoreCb
+## state idle [initial]
+- ignore: toggle
+
+## state done [final]
+
+## transitions
+| Source | Event  | Guard | Target | Action |
+|--------|--------|-------|--------|--------|
+| idle   | toggle |       | done   |        |
+| idle   | go     |       | done   |        |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        let log: Arc<Mutex<Vec<(String, String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_clone = log.clone();
+
+        machine.on_transition(Box::new(move |from, to, event| {
+            log_clone.lock().unwrap().push((
+                from.to_string(),
+                to.to_string(),
+                event.to_string(),
+            ));
+        }));
+        machine.start().unwrap();
+
+        machine.send(r#"{"type":"toggle"}"#).unwrap();
+        assert_eq!(log.lock().unwrap().len(), 0);
+
+        machine.send(r#"{"type":"go"}"#).unwrap();
+        let entries = log.lock().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0], ("idle".to_string(), "done".to_string(), "go".to_string()));
+    }
+
+    // -- Logging tests --
+
+    use std::sync::{Arc, Mutex};
+
+    struct CollectorSink {
+        entries: Arc<Mutex<Vec<LogEntry>>>,
+    }
+
+    impl CollectorSink {
+        fn new() -> (Self, Arc<Mutex<Vec<LogEntry>>>) {
+            let entries = Arc::new(Mutex::new(Vec::new()));
+            (Self { entries: entries.clone() }, entries)
+        }
+    }
+
+    impl LogSink for CollectorSink {
+        fn write(&mut self, entry: &LogEntry) -> Result<(), std::io::Error> {
+            self.entries.lock().unwrap().push(entry.clone());
+            Ok(())
+        }
+        fn close(&mut self) -> Result<(), std::io::Error> {
+            Ok(())
+        }
+    }
+
+    unsafe impl Send for CollectorSink {}
+
+    #[test]
+    fn test_log_sink_fires_on_transition() {
+        let md = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+
+## state running [initial]
+
+## transitions
+| Source  | Event | Guard | Target  | Action    |
+|---------|-------|-------|---------|-----------|
+| running | inc   |       | running | increment |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.register_action_rust(
+            "increment",
+            Box::new(|ctx, _| {
+                let count = ctx.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+                serde_json::json!({"count": count + 1})
+            }),
+        );
+
+        let (sink, entries) = CollectorSink::new();
+        machine.set_log_sink(Box::new(sink));
+        machine.set_run_id("test-run-42".to_string());
+        machine.start().unwrap();
+
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+
+        let log = entries.lock().unwrap();
+        assert_eq!(log.len(), 3);
+        assert_eq!(log[0].run_id, "test-run-42");
+        assert_eq!(log[0].machine, "Counter");
+        assert_eq!(log[0].event, "inc");
+        assert_eq!(log[0].from, "running");
+        assert_eq!(log[0].to, "running");
+        assert!(!log[0].ts.is_empty());
+        assert!(log[0].context_delta.contains_key("count"));
+        assert_eq!(log[0].context_delta["count"], serde_json::json!(1));
+        assert_eq!(log[1].context_delta["count"], serde_json::json!(2));
+        assert_eq!(log[2].context_delta["count"], serde_json::json!(3));
+    }
+
+    // -- Snapshot / Restore tests --
+
+    #[test]
+    fn test_snapshot_restore_roundtrip() {
+        let md = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+
+## state running [initial]
+
+## transitions
+| Source  | Event | Guard | Target  | Action    |
+|---------|-------|-------|---------|-----------|
+| running | inc   |       | running | increment |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.register_action_rust(
+            "increment",
+            Box::new(|ctx, _| {
+                let count = ctx.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+                serde_json::json!({"count": count + 1})
+            }),
+        );
+        machine.set_run_id("run-42".to_string());
+        machine.start().unwrap();
+
+        // Advance to count=3
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+
+        // Snapshot
+        let json = machine.snapshot().unwrap();
+        let snap: Snapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap.state, "running");
+        assert_eq!(snap.context["count"], 3);
+        assert_eq!(snap.run_id, "run-42");
+        assert!(snap.active);
+
+        // Create a new machine from the same definition
+        let def2 = parse_orca_md(md).unwrap();
+        let mut machine2 = OrcaMachine::new(def2).unwrap();
+        machine2.register_action_rust(
+            "increment",
+            Box::new(|ctx, _| {
+                let count = ctx.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+                serde_json::json!({"count": count + 1})
+            }),
+        );
+        machine2.set_run_id("other-run".to_string());
+        machine2.start().unwrap();
+
+        // Restore
+        machine2.restore(&json).unwrap();
+        assert_eq!(machine2.state(), "running");
+        assert_eq!(machine2.context["count"], 3);
+        assert_eq!(machine2.run_id, "run-42");
+        assert!(machine2.is_active());
+    }
+
+    #[test]
+    fn test_resume_cold_boot() {
+        // Test that resume() cold-starts without re-running on_entry actions.
+        // We use a counter that increments on entry — if resume() accidentally
+        // re-runs on_entry, the count will be higher than expected.
+        let md = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+
+## state running [initial]
+- on_entry: increment
+
+## transitions
+| Source  | Event | Guard | Target  | Action    |
+|---------|-------|-------|---------|-----------|
+| running | inc   |       | running |           |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.register_action_rust(
+            "increment",
+            Box::new(|ctx, _| {
+                let count = ctx.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+                serde_json::json!({"count": count + 1})
+            }),
+        );
+        machine.set_run_id("run-99".to_string());
+        machine.start().unwrap();
+
+        // on_entry runs once at start, count = 1
+        assert_eq!(machine.context["count"], 1);
+
+        // Advance counter to count=4
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        assert_eq!(machine.context["count"], 4);
+
+        // Snapshot and resume into a new machine
+        let json = machine.snapshot().unwrap();
+        let snap: Snapshot = serde_json::from_str(&json).unwrap();
+
+        let def2 = parse_orca_md(md).unwrap();
+        let mut machine2 = OrcaMachine::new(def2).unwrap();
+        machine2.register_action_rust(
+            "increment",
+            Box::new(|ctx, _| {
+                let count = ctx.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+                serde_json::json!({"count": count + 1})
+            }),
+        );
+        machine2.resume(&snap).unwrap();
+
+        // resume() should NOT re-run on_entry — count stays at 4 (not 5)
+        assert_eq!(machine2.context["count"], 4);
+        assert_eq!(machine2.state(), "running");
+        assert_eq!(machine2.run_id, "run-99");
+        assert!(machine2.is_active());
+    }
+
+    #[test]
+    fn test_resume_after_final_state() {
+        let md = r#"# machine Linear
+## state start [initial]
+## state end [final]
+## transitions
+| Source | Event | Guard | Target | Action |
+|--------|-------|-------|--------|--------|
+| start  | go    |       | end    |        |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.start().unwrap();
+        machine.send(r#"{"type":"go"}"#).unwrap();
+
+        assert_eq!(machine.state(), "end");
+        assert!(!machine.is_active());
+
+        let json = machine.snapshot().unwrap();
+        let snap: Snapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(snap.state, "end");
+        assert!(!snap.active);
+    }
+
+    #[test]
+    fn test_restore_malformed_json() {
+        let md = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+## state running [initial]
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+        machine.start().unwrap();
+
+        let result = machine.restore("not valid json at all");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("deserialize failed"));
+    }
+
+    // -- Effects tests --
+
+    #[test]
+    fn test_effect_registry_basic() {
+        use crate::runtime::effects::EffectRegistry;
+
+        let md = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+
+## state running [initial]
+
+## transitions
+| Source  | Event | Guard | Target  | Action    |
+|---------|-------|-------|---------|-----------|
+| running | inc   |       | running | increment |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+
+        let mut registry = EffectRegistry::new();
+        registry.register("increment".to_string(), Box::new(|name, payload| {
+            // Effects ignore the name when invoked via registry (already dispatched by name)
+            let count = payload
+                .get("context")
+                .and_then(|v| v.get("count"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            Ok(serde_json::json!({"count": count + 1}))
+        }));
+
+        machine.set_effect_registry(registry);
+        machine.start().unwrap();
+
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        assert_eq!(machine.context["count"], 1);
+
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        assert_eq!(machine.context["count"], 2);
+    }
+
+    #[test]
+    fn test_effect_registry_not_found_falls_through() {
+        let md = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+
+## state running [initial]
+
+## transitions
+| Source  | Event | Guard | Target  | Action    |
+|---------|-------|-------|---------|-----------|
+| running | inc   |       | running | increment |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+
+        // Register a different effect name — "increment" not in registry,
+        // so it falls through to regular action handler
+        let mut registry = EffectRegistry::new();
+        registry.register("other_effect".to_string(), Box::new(|_, _| {
+            Ok(serde_json::json!({"count": 99}))
+        }));
+        machine.set_effect_registry(registry);
+
+        machine.register_action_rust(
+            "increment",
+            Box::new(|ctx, _| {
+                let count = ctx.get("count").and_then(|v| v.as_i64()).unwrap_or(0);
+                serde_json::json!({"count": count + 10})
+            }),
+        );
+        machine.start().unwrap();
+
+        // "increment" not in registry, falls through to action_handlers
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        assert_eq!(machine.context["count"], 10);
+    }
+
+    #[test]
+    fn test_effect_registry_effect_wins_over_action_handler() {
+        let md = r#"# machine Counter
+## context
+| Field | Type | Default |
+|-------|------|---------|
+| count | int  | 0       |
+
+## state running [initial]
+
+## transitions
+| Source  | Event | Guard | Target  | Action    |
+|---------|-------|-------|---------|-----------|
+| running | inc   |       | running | increment |
+"#;
+        let def = parse_orca_md(md).unwrap();
+        let mut machine = OrcaMachine::new(def).unwrap();
+
+        // Register both an effect and an action handler for "increment"
+        let mut registry = EffectRegistry::new();
+        registry.register("increment".to_string(), Box::new(|_, _| {
+            Ok(serde_json::json!({"count": 999}))
+        }));
+        machine.set_effect_registry(registry);
+
+        // This should NOT be called since effect registry takes precedence
+        machine.register_action_rust(
+            "increment",
+            Box::new(|_, _| {
+                serde_json::json!({"count": 10})
+            }),
+        );
+        machine.start().unwrap();
+
+        machine.send(r#"{"type":"inc"}"#).unwrap();
+        // Effect handler should have been called
+        assert_eq!(machine.context["count"], 999);
     }
 }

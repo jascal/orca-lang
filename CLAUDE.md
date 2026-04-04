@@ -127,6 +127,9 @@ Rust runtime with C-compatible FFI surface. Markdown parser (two-phase: structur
 ### packages/demo-rust (orca-demo-rust)
 Conway's Game of Life. Every cell in the grid is an independent Orca state machine (`cell.orca.md`: states `dead`/`alive`, guard-based transitions encoding Conway's rules). Two-phase evolution protocol: `count` event stores neighbor count in context, then `evolve` event triggers guard evaluation (`neighbors == 2`, `neighbors == 3`, `else`) for state transitions. Half-block Unicode rendering (`U+2580`) for double vertical resolution, age-based color gradients (bright cyan -> dark green), death flash effects. 7 classic patterns (Gosper Glider Gun, Pulsar, R-pentomino, Acorn, LWSS, Glider, Random). Keyboard controls for pause, step, reset, pattern switching, speed. Depends on `orca-runtime-rust` as a native Rust library. 7 tests.
 
+### packages/demo-rust-event (orca-demo-rust-event)
+Event-Sourced Counter. Demonstrates Rust runtime features: guard-aware verification, transition logging via `LogSink`, snapshot/restore via `FilePersistence`, and cold-boot `resume()` that skips `on_entry`. A 4-state counter machine (zero/positive/negative/saturated) with guard-based transitions and action handlers registered as Rust closures. Run fresh (`cargo run`) to create a snapshot, or with `--resume` to continue from the saved state. Depends on `orca-runtime-rust` as a native Rust library.
+
 ### packages/demo-fortran
 N-agent market simulation. 80 concurrent state machine agents (20 Producer, 50 Consumer, 10 Speculator) driven by a Fortran tick loop via Orca's C FFI. Fortran owns the scheduler — sends ticks, waits for completion, computes market price, broadcasts price signals. Emergent macro behavior (price equilibrium, speculative bubbles) from simple local rules. Requires `gfortran` and links against `runtime-rust`.
 

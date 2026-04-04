@@ -1,0 +1,13 @@
+[package]
+name = "orca-demo-rust-event"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+orca-runtime-rust = { path = "../runtime-rust" }
+serde_json = "1"
+crossterm = "0.28"
+dirs = "6"
+
+[lib]
+path = "src/lib.rs"
