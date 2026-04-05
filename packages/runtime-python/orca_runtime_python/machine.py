@@ -717,10 +717,10 @@ class OrcaMachine:
         """Resolve a ValueRef to its Python value."""
         return ref.value
 
-    def _eval_compare(self, op: str, left: VariableRef, right: ValueRef) -> bool:
+    def _eval_compare(self, op: str, left: VariableRef, right: "ValueRef | VariableRef") -> bool:
         """Evaluate a comparison guard."""
         lhs = self._resolve_variable(left)
-        rhs = self._resolve_value(right)
+        rhs = self._resolve_variable(right) if isinstance(right, VariableRef) else self._resolve_value(right)
 
         # Try numeric comparison
         try:

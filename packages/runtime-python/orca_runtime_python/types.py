@@ -124,7 +124,7 @@ class GuardCompare(GuardExpression):
     """Comparison guard: left op right"""
     op: str  # eq, ne, lt, gt, le, ge
     left: VariableRef
-    right: ValueRef
+    right: "ValueRef | VariableRef"
 
 
 @dataclass
