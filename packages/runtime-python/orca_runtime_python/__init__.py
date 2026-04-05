@@ -33,7 +33,7 @@ from .persistence import PersistenceAdapter, AsyncPersistenceAdapter, FilePersis
 
 from .logging import LogSink, FileSink, ConsoleSink, MultiSink
 
-__version__ = "0.1.25"
+__version__ = "0.1.26"
 
 __all__ = [
     # Types
