@@ -390,10 +390,10 @@ class OrcaMachine:
                 from_state=str(self._state),
             )
 
-        # Find matching transition
-        transition = self._find_transition(evt)
+        # Find matching transitions (may be multiple with different guards)
+        candidates = self._find_transitions(evt)
 
-        if not transition:
+        if not candidates:
             # No transition found - event unhandled
             return TransitionResult(
                 taken=False,
@@ -401,16 +401,28 @@ class OrcaMachine:
                 error=f"No transition for event {event_key} from {self._state.leaf()}"
             )
 
-        # Evaluate guard if present
-        if transition.guard:
-            guard_passed = await self._evaluate_guard(transition.guard)
-            if not guard_passed:
-                return TransitionResult(
-                    taken=False,
-                    from_state=str(self._state),
-                    guard_failed=True,
-                    error=f"Guard '{transition.guard}' failed"
-                )
+        # Try each candidate in order; first whose guard passes wins
+        transition = None
+        last_guard_name = None
+        for candidate in candidates:
+            if candidate.guard:
+                guard_passed = await self._evaluate_guard(candidate.guard)
+                if guard_passed:
+                    transition = candidate
+                    break
+                last_guard_name = candidate.guard
+            else:
+                # No guard — unconditional match
+                transition = candidate
+                break
+
+        if transition is None:
+            return TransitionResult(
+                taken=False,
+                from_state=str(self._state),
+                guard_failed=True,
+                error=f"Guard '{last_guard_name}' failed"
+            )
 
         # Execute the transition
         old_state = StateValue(self._state.value)
@@ -532,16 +544,20 @@ class OrcaMachine:
         # Default fallback
         return EventType.STATE_CHANGED
 
-    def _find_transition(self, event: Event) -> Transition | None:
-        """Find a transition matching the current state and event."""
+    def _find_transitions(self, event: Event) -> list[Transition]:
+        """Find all transitions matching the current state and event."""
         event_key = event.event_name or event.type.value
+        result: list[Transition] = []
 
         # Check all active leaf states (important for parallel states)
         for current in self._state.leaves():
             # Try direct match on current leaf state
             for t in self.definition.transitions:
                 if t.source == current and t.event == event_key:
-                    return t
+                    result.append(t)
+
+            if result:
+                return result
 
             # For compound states, also check parent's transitions
             # Transitions on parent fire from any child
@@ -549,10 +565,12 @@ class OrcaMachine:
             while parent:
                 for t in self.definition.transitions:
                     if t.source == parent and t.event == event_key:
-                        return t
+                        result.append(t)
+                if result:
+                    return result
                 parent = self._get_parent_state(parent)
 
-        return None
+        return result
 
     def _get_parent_state(self, state_name: str) -> str | None:
         """Get parent state name if state is nested (searches parallel regions too)."""
