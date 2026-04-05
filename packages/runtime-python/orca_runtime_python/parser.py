@@ -556,6 +556,14 @@ def _parse_guard_expression(input_str: str) -> GuardExpression:
             return GuardNot(expr=parse_primary())
         return parse_primary()
 
+    def _lookahead_is_var_path() -> bool:
+        """Check if current position starts a variable path (ident.ident...)."""
+        return (
+            pos[0] + 1 < len(tokens)
+            and tokens[pos[0]].type == "ident"
+            and tokens[pos[0] + 1].type == "dot"
+        )
+
     def parse_primary() -> GuardExpression:
         tok = peek()
 
@@ -593,6 +601,10 @@ def _parse_guard_expression(input_str: str) -> GuardExpression:
         # Comparison operator
         if peek().type == "op":
             op = advance().value
+            # RHS: variable path (ctx.foo) or literal value
+            if peek().type == "ident" and _lookahead_is_var_path():
+                right_ref = parse_var_path()
+                return GuardCompare(op=_map_op(op), left=var_path, right=right_ref)
             right = parse_value()
             # Special case: != null and == null
             if right.type == "null":

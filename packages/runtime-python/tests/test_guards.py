@@ -12,6 +12,7 @@ from orca_runtime_python.types import (
     GuardOr,
     GuardNot,
     GuardNullcheck,
+    VariableRef,
 )
 
 
@@ -124,6 +125,30 @@ def test_parse_string_compare():
     assert isinstance(guard, GuardCompare), f"Expected GuardCompare, got {type(guard)}"
     assert guard.op == "eq", f"Expected op 'eq', got '{guard.op}'"
     assert guard.right.value == "pending", f"Expected value 'pending', got {guard.right.value}"
+
+
+def test_parse_var_to_var_compare():
+    defn = parse_orca_md(orca_md("ctx.score >= ctx.threshold", "score"))
+    guard = defn.guards["g"]
+    assert isinstance(guard, GuardCompare), f"Expected GuardCompare, got {type(guard)}"
+    assert guard.op == "ge", f"Expected op 'ge', got '{guard.op}'"
+    assert guard.left.path == ["ctx", "score"]
+    assert isinstance(guard.right, VariableRef), f"Expected VariableRef on RHS, got {type(guard.right)}"
+    assert guard.right.path == ["ctx", "threshold"]
+
+
+def test_parse_var_to_var_and():
+    defn = parse_orca_md(orca_md("ctx.a > ctx.b and ctx.c < ctx.d", "a"))
+    guard = defn.guards["g"]
+    assert isinstance(guard, GuardAnd), f"Expected GuardAnd, got {type(guard)}"
+    left = guard.left
+    right = guard.right
+    assert isinstance(left, GuardCompare)
+    assert isinstance(left.right, VariableRef)
+    assert left.right.path == ["ctx", "b"]
+    assert isinstance(right, GuardCompare)
+    assert isinstance(right.right, VariableRef)
+    assert right.right.path == ["ctx", "d"]
 
 
 # ---- Evaluator tests ----
@@ -252,6 +277,86 @@ async def _test_eval_false_literal():
     assert result.guard_failed is True, f"Expected guard_failed"
 
 
+def _orca_md_multi_ctx(guard_expr: str, fields: list[tuple[str, str, str]]) -> str:
+    """Helper with multiple context fields: [(name, type, default), ...]."""
+    rows = "\n".join(f"| {n} | {t} | {d} |" for n, t, d in fields)
+    return f"""# machine test
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+{rows}
+
+## events
+
+- GO
+
+## state idle [initial]
+> Idle state
+
+## state done [final]
+> Done state
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| g | `{guard_expr}` |
+
+## transitions
+
+| Source | Event | Target | Guard |
+|--------|-------|--------|-------|
+| idle   | GO    | done   | g |
+"""
+
+
+async def _test_eval_var_to_var_ge_pass():
+    defn = parse_orca_md(_orca_md_multi_ctx(
+        "ctx.score >= ctx.threshold",
+        [("score", "number", "95"), ("threshold", "number", "80")],
+    ))
+    machine = OrcaMachine(defn, event_bus=EventBus())
+    await machine.start()
+    result = await machine.send("GO")
+    assert result.taken is True, f"Expected transition taken, got: {result.error}"
+
+
+async def _test_eval_var_to_var_ge_fail():
+    defn = parse_orca_md(_orca_md_multi_ctx(
+        "ctx.score >= ctx.threshold",
+        [("score", "number", "0"), ("threshold", "number", "0")],
+    ))
+    machine = OrcaMachine(defn, event_bus=EventBus(), context={"score": 50, "threshold": 80})
+    await machine.start()
+    result = await machine.send("GO")
+    assert result.taken is False, f"Expected transition NOT taken"
+    assert result.guard_failed is True, f"Expected guard_failed"
+
+
+async def _test_eval_var_to_var_lt_pass():
+    defn = parse_orca_md(_orca_md_multi_ctx(
+        "ctx.retry_count < ctx.max_retries",
+        [("retry_count", "number", "0"), ("max_retries", "number", "0")],
+    ))
+    machine = OrcaMachine(defn, event_bus=EventBus(), context={"retry_count": 1, "max_retries": 3})
+    await machine.start()
+    result = await machine.send("GO")
+    assert result.taken is True, f"Expected transition taken, got: {result.error}"
+
+
+async def _test_eval_var_to_var_eq():
+    defn = parse_orca_md(_orca_md_multi_ctx(
+        "ctx.actual == ctx.expected",
+        [("actual", "number", "0"), ("expected", "number", "0")],
+    ))
+    machine = OrcaMachine(defn, event_bus=EventBus(), context={"actual": 42, "expected": 42})
+    await machine.start()
+    result = await machine.send("GO")
+    assert result.taken is True, f"Expected transition taken, got: {result.error}"
+
+
 # ---- Sync test wrappers ----
 
 def test_eval_compare_pass():
@@ -299,6 +404,18 @@ def test_eval_true_literal():
 def test_eval_false_literal():
     asyncio.run(_test_eval_false_literal())
 
+def test_eval_var_to_var_ge_pass():
+    asyncio.run(_test_eval_var_to_var_ge_pass())
+
+def test_eval_var_to_var_ge_fail():
+    asyncio.run(_test_eval_var_to_var_ge_fail())
+
+def test_eval_var_to_var_lt_pass():
+    asyncio.run(_test_eval_var_to_var_lt_pass())
+
+def test_eval_var_to_var_eq():
+    asyncio.run(_test_eval_var_to_var_eq())
+
 
 if __name__ == "__main__":
     tests = [
@@ -329,6 +446,13 @@ if __name__ == "__main__":
         ("eval compare >= boundary", test_eval_compare_ge),
         ("eval true literal", test_eval_true_literal),
         ("eval false literal", test_eval_false_literal),
+        # Variable-to-variable comparison tests
+        ("parse var-to-var compare", test_parse_var_to_var_compare),
+        ("parse var-to-var and", test_parse_var_to_var_and),
+        ("eval var-to-var >= pass (95 >= 80)", test_eval_var_to_var_ge_pass),
+        ("eval var-to-var >= fail (50 >= 80)", test_eval_var_to_var_ge_fail),
+        ("eval var-to-var < pass (1 < 3)", test_eval_var_to_var_lt_pass),
+        ("eval var-to-var == pass (42 == 42)", test_eval_var_to_var_eq),
     ]
 
     passed = 0
