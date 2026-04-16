@@ -87,6 +87,9 @@ function generateConditionCheck(condName: string, condType: string, cell: CellVa
         if (condType === 'bool') {
           return `input.${condName} === ${v}`;
         }
+        if (condType === 'int_range' || condType === 'decimal_range') {
+          return `input.${condName} === ${v}`;
+        }
         return `input.${condName} === '${v}'`;
       }).join(' || ');
       return `(${checks})`;
@@ -234,6 +237,12 @@ export function compileDecisionTableToJSON(dt: DecisionTableDef): string {
           conditions[name] = `!${cell.value}`;
         } else if (cell.kind === 'set') {
           conditions[name] = cell.values.join(',');
+        } else if (cell.kind === 'compare') {
+          conditions[name] = `${cell.op}${cell.value}`;
+        } else if (cell.kind === 'range') {
+          const lowBracket = cell.lowInc ? '' : '(';
+          const highBracket = cell.highInc ? '' : ')';
+          conditions[name] = `${lowBracket}${cell.low}..${cell.high}${highBracket}`;
         }
         // 'any' is omitted
       }

@@ -302,6 +302,13 @@ export function checkReachability(analysis: MachineAnalysis): VerificationError[
     if (visited.has(name)) continue;
     visited.add(name);
 
+    // When a compound/parallel state is visited, its children are reachable too
+    for (const [flatName] of stateMap) {
+      if (flatName.startsWith(name + '.') && !visited.has(flatName)) {
+        queue.push(flatName);
+      }
+    }
+
     const info = stateMap.get(name);
     if (!info) continue;
 
@@ -312,14 +319,14 @@ export function checkReachability(analysis: MachineAnalysis): VerificationError[
     }
   }
 
-  for (const state of analysis.machine.states) {
-    if (!visited.has(state.name)) {
+  for (const [name] of stateMap) {
+    if (!visited.has(name)) {
       errors.push({
         code: 'UNREACHABLE_STATE',
-        message: `State '${state.name}' is unreachable from initial state '${initialState.name}'`,
+        message: `State '${name}' is unreachable from initial state '${initialState.name}'`,
         severity: 'error',
-        location: { state: state.name },
-        suggestion: `Add a transition that reaches '${state.name}'`,
+        location: { state: name },
+        suggestion: `Add a transition that reaches '${name}'`,
       });
     }
   }
