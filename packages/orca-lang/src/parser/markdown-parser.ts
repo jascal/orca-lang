@@ -511,7 +511,13 @@ function parsePropertyFromBullet(text: string): Property {
     const to = parts[0].trim();
     const withinParts = parts[1].split(/\s+within\s+/);
     const from = withinParts[0].trim();
+    if (!withinParts[1]) {
+      throw new Error(`Invalid responds property: missing 'within N' bound in '${text}'`);
+    }
     const within = parseInt(withinParts[1].trim(), 10);
+    if (isNaN(within)) {
+      throw new Error(`Invalid responds property: 'within' value '${withinParts[1].trim()}' is not a number in '${text}'`);
+    }
     // Match DSL parser property order: kind, from, to, within
     return { kind: 'responds', from, to, within } as RespondsProperty;
   }

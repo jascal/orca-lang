@@ -98,19 +98,19 @@ function areGuardsMutuallyExclusive(
   // Strategy 2: Resolve to expressions and check pairwise exclusivity
   const resolvedExprs = guardRefs.map(ref => resolveGuardExpression(ref, guardDefs));
 
-  // If any guard couldn't be resolved, we can't verify — assume OK
-  if (resolvedExprs.some(e => e === null)) return true;
+  // If any guard couldn't be resolved, we can't verify — assume not exclusive
+  if (resolvedExprs.some(e => e === null)) return false;
 
   // Check all pairs are mutually exclusive
   for (let i = 0; i < resolvedExprs.length; i++) {
     for (let j = i + 1; j < resolvedExprs.length; j++) {
-      if (areExpressionsMutuallyExclusive(resolvedExprs[i]!, resolvedExprs[j]!)) {
-        return true;
+      if (!areExpressionsMutuallyExclusive(resolvedExprs[i]!, resolvedExprs[j]!)) {
+        return false;
       }
     }
   }
 
-  return false;
+  return true;
 }
 
 /**

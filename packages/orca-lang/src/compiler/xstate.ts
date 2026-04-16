@@ -528,7 +528,7 @@ export function compileToXState(machine: MachineDef): string {
             lines.push(`            target: '${target}',`);
             if (t.guard) {
               const guardName = t.guard.negated ? `!${t.guard.name}` : t.guard.name;
-              lines.push(`            guard: '${guardName}',`);
+              lines.push(`            guard: { type: '${guardName}' },`);
             }
             if (t.action) {
               lines.push(`            actions: '${t.action}',`);
@@ -554,6 +554,20 @@ export function compileToXState(machine: MachineDef): string {
   }
 
   lines.push(`  },`);
+
+  // Emit guards section if any guards are defined
+  if (machine.guards.length > 0) {
+    lines.push(`}, {`);
+    lines.push(`  guards: {`);
+    for (const guard of machine.guards) {
+      lines.push(`    '${guard.name}': ({ context }) => {`);
+      lines.push(`      // TODO: implement guard logic for: ${guard.name}`);
+      lines.push(`      return true;`);
+      lines.push(`    },`);
+    }
+    lines.push(`  },`);
+  }
+
   lines.push(`});`);
 
   return lines.join('\n');
