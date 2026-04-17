@@ -1,6 +1,6 @@
 RUST_LIB_DIR = ../runtime-rust/target/release
 FC = gfortran
-FFLAGS = -Wall -O2 -ffree-line-length-none
+FFLAGS = -Wall -Wno-unused-dummy-argument -O2 -ffree-line-length-none
 LDFLAGS = -L$(RUST_LIB_DIR) -lorca_runtime_rust -lpthread -ldl -lm
 
 UNAME := $(shell uname)
