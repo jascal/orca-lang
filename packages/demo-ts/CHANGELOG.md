@@ -1,5 +1,12 @@
 # orca-demo-ts
 
+## 0.1.15
+
+### Patch Changes
+
+- Updated dependencies
+  - @orcalang/orca-runtime-ts@0.1.26
+
 ## 0.1.14
 
 ### Patch Changes

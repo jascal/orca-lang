@@ -1,5 +1,11 @@
 # @orcalang/orca-runtime-ts
 
+## 0.1.26
+
+### Patch Changes
+
+- Bump @orcalang/orca-runtime-ts
+
 ## 0.1.25
 
 ## 0.1.24
