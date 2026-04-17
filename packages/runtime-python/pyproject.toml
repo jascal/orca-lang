@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orca-runtime-python"
-version = "0.1.26"
+version = "0.1.27"
 description = "Python async runtime for Orca state machines"
 readme = "README.md"
 license = {text = "Apache-2.0"}

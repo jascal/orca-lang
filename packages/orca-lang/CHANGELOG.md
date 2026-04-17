@@ -1,5 +1,19 @@
 # @orcalang/orca-lang
 
+## 0.1.27
+
+### Patch Changes
+
+- fix(verifier): determinism checker now requires ALL guard pairs mutually exclusive
+- fix(verifier): unresolved guards return false (warn) instead of true (silent pass)
+- fix(verifier): reachability iterates flattened stateMap, propagates to children
+- fix(parser): `responds:` property validates `within N` bound
+- fix(xstate): emit guard objects (`{ type: 'name' }`) instead of bare strings
+- fix(xstate): emit `guards: { ... }` section with stubs when guards are defined
+- fix(dt-compiler): `int_range`/`decimal_range` set conditions emit unquoted numerics
+- fix(dt-compiler): JSON compiler serializes compare and range cell kinds
+- fix(demo-fortran): suppress unused dummy argument warnings in Makefile
+
 ## 0.1.26
 
 ### Patch Changes
