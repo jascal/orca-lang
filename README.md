@@ -1,5 +1,8 @@
 # Orca
 
+[![CI](https://github.com/jascal/orca-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/jascal/orca-lang/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/@orcalang/orca-lang)](https://www.npmjs.com/package/@orcalang/orca-lang)
+[![Node 20+](https://img.shields.io/badge/node-20%2B-blue)](https://nodejs.org/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jascal/orca-lang)
 
 **Orchestrated State Machine Language** — a two-layer architecture for reliable LLM code generation.
