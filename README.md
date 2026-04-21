@@ -1,5 +1,7 @@
 # Orca
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/jascal/orca-lang)
+
 **Orchestrated State Machine Language** — a two-layer architecture for reliable LLM code generation.
 
 The core insight: LLMs generate flat transition tables reliably, but they struggle to guarantee topology correctness on their own. Orca separates *program structure* (state machine topology) from *computation* (action functions), then verifies the structure automatically before any code runs.
