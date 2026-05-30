@@ -73,16 +73,37 @@ AST: add `ReturnDef { name: string; type: string; statistics: string[] }` and
 `returns?: ReturnDef[]` on `MachineDef`. Absent section → empty, and the parent
 falls back to the current `{ finalState, context }` behavior.
 
+**Name collisions.** A declared return name is a *child-side* label; it lives in
+the child's namespace and never shadows a parent context field. On the parent
+side, `- returns: { parent_field: child_return }` writes into `parent_field`,
+which MUST be a declared parent context field — if it isn't, the verifier emits
+an error (it does not silently create a field). A synthesized aggregate name
+(`prob_<r>`) colliding with an existing same-typed parent field is treated as an
+intentional reuse; a type mismatch is a verify error.
+
 ### 2. Invoke return bindings + `shots:`
 
 Extend `InvokeDef` with:
 
+Inline form (preferred for the common case — keeps a simple invoke on one line):
+
+```md
+## state training
+- invoke: QForward input: { theta: ctx.theta } shots: 1024 returns: { prob: prob_bits_0 }
+- on_done: STEP_DONE
+```
+
+Multi-line form (for many bindings; `input:` / `shots:` / `returns:` may each sit
+on their own `- invoke …` continuation):
+
 ```md
 ## state training
 - invoke: QForward input: { theta: ctx.theta } shots: 1024
-- returns: { prob: prob_bits_0 }
+- returns: { prob: prob_bits_0, hist: hist_bits_0 }
 - on_done: STEP_DONE
 ```
+
+Both forms parse to the same `InvokeDef`.
 
 - `input:` (existing) maps `child_param -> ctx.field`.
 - `returns:` (new) maps `parent_field -> child_return`. For a shot-batched
@@ -110,6 +131,49 @@ Implement orca's side of the three JSON envelopes from the q-orca spec:
 
 Symmetrically, orca's own runner exposes a `run --json` inbound entry point so a
 q-orca parent can invoke an orca child through the same protocol.
+
+#### `measurement_bearing` determination
+
+The descriptor's `measurement_bearing` flag is a property of the **child**, not
+the call site, and is derived from the child's definition — **not** from whether
+any invoke passes `shots:`. A machine is measurement-bearing iff it contains a
+measurement effect (a `measure(...)`-style action). q-orca decides this exactly
+this way today (any action with a measurement / mid-circuit-measure effect); orca
+machines are classical and report `false`. The flag is what lets the verifier
+reject `shots:` on a classical child.
+
+#### Protocol versioning
+
+Every envelope carries a `protocol_version` field. The q-orca spec owns the
+canonical value; orca duplicates the constant and a conformance test pins both
+sides against the same fixture envelopes. A version the receiver does not support
+is a hard, surfaced error — never a silent misread.
+
+#### Error-handling contract
+
+The result envelope distinguishes two failure modes, which map to orca's existing
+`on_error` handling:
+
+- **Child machine error** — the child ran but reached an error/failure final
+  state (or its runner reported a domain error). The result envelope carries an
+  `error` field with a structured code/message; the parent emits its `on_error`
+  event.
+- **Bridge/transport error** — the foreign runner could not be invoked, timed
+  out, returned non-JSON, or returned an unsupported `protocol_version`. This is
+  raised as a bridge error distinct from a child error; if the invoke declares
+  `on_error`, the parent emits it with a `bridge`-category code so the author can
+  tell "the child rejected my input" from "the bridge itself failed."
+
+#### Safety
+
+Dispatching a foreign child shells out to `q-orca run`. The bridge SHALL: pass
+the invocation envelope over a pipe (never interpolate values into a shell
+string), validate every `arg` value against the child descriptor's parameter
+types before dispatch, and resolve the foreign machine path only within the
+project's import roots (no absolute paths — consistent with q-orca's import
+rules). A future training-loop use with untrusted machines would add an execution
+timeout and an opt-in allowlist of runnable tools; both slot behind the same
+dispatch boundary.
 
 ---
 
@@ -164,11 +228,64 @@ same-tool invokes. The bridge path activates only for foreign children.
 
 ---
 
+## Worked Example: Hybrid Trainer + Quantum Forward Pass
+
+A classical orca trainer drives a q-orca quantum forward pass and reads back the
+measured-bit expectation:
+
+```md
+# machine Trainer
+
+## context
+| Field | Type  |
+|-------|-------|
+| theta | float |
+| prob  | float |
+
+## returns
+| Name | Type  |
+|------|-------|
+| prob | float |
+
+## state step [initial]
+> One training step: run the quantum forward pass, read the expectation.
+- invoke: QForward input: { theta: ctx.theta } shots: 1024 returns: { prob: prob_bits_0 }
+- on_done: STEPPED
+
+## state stepped [final]
+
+## transitions
+| Source | Event   | Target  |
+|--------|---------|---------|
+| step   | STEPPED | stepped |
+```
+
+`QForward` is a q-orca machine (`forward.q.orca.md`) declaring
+`bits[0]: bit` with `expectation` statistics. The bridge runs it at 1024 shots
+and binds the synthesized `prob_bits_0` into the trainer's `prob`. (The q-orca
+side is the `composed_predictive_coder` fixture, which already runs in-tool via
+`q-orca run`.)
+
+## Open Questions
+
+1. **How does the verifier know a local `.q.orca.md` child is
+   measurement-bearing?** It asks the bridge for the child's **machine
+   descriptor** (which carries `measurement_bearing` and the typed returns)
+   before checking the invoke — i.e. resolution emits the descriptor first, then
+   arg/return/shots typing runs against it. The descriptor is cheap (parse +
+   introspect; no execution).
+2. **Bidirectional rich returns (q-orca invoking orca, getting typed returns)?**
+   In scope by symmetry: the same three envelopes work both directions, and orca
+   exposing `run --json` is the inbound half. The *worked* example here is
+   orca→q-orca; the reverse direction is exercised by the same conformance
+   fixtures and needs no additional protocol — just orca's `run --json` endpoint.
+
 ## Dependencies / Cross-References
 
-- **q-orca bridge protocol**:
-  `q-orca-lang/openspec/changes/add-cross-tool-bridge-protocol` — defines the
-  envelopes and handoff this document implements on orca's side.
+- **q-orca bridge protocol** (in-flight OpenSpec change):
+  `q-orca-lang/openspec/changes/add-cross-tool-bridge-protocol/specs/bridge-protocol/spec.md`
+  — defines the three envelopes (descriptor / invocation / result) and the
+  handoff this document implements on orca's side.
 - **Sequenced after** orca's existing machine invocation
   (`docs/machine-invocation-design.md`, shipped) and q-orca's
   `add-parameterized-invoke` / `add-composed-runtime` (shipped).
