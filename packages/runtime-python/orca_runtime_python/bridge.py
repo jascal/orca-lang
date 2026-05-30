@@ -145,9 +145,14 @@ def dispatch_foreign(runner_argv: list[str], invocation: dict, timeout: float = 
 
     try:
         return parse_result(proc.stdout)
-    except BridgeError:
+    except BridgeError as exc:
+        stderr = proc.stderr.strip()[:300]
         if proc.returncode != 0:
             raise BridgeError(
-                f"foreign runner exited {proc.returncode}: {proc.stderr.strip()[:200]}"
-            )
+                f"foreign runner exited {proc.returncode}"
+                + (f": {stderr}" if stderr else "")
+            ) from exc
+        # Exit 0 but unusable output — surface stderr to aid debugging.
+        if stderr:
+            raise BridgeError(f"{exc} (runner stderr: {stderr})") from exc
         raise

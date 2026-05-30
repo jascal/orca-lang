@@ -166,3 +166,22 @@ async def test_orca_parent_invokes_foreign_quantum_child():
     assert machine.context["prob"] == 0.73
     assert machine.state.leaf() == "stepped"
     await machine.stop()
+
+
+# A foreign runner that omits the bound return (empty returns map).
+_EMPTY_RETURNS_RUNNER = [
+    sys.executable, "-c",
+    "import sys,json; json.load(sys.stdin); "
+    "print(json.dumps({'protocol_version': '1.0', 'final_state': 'measured', 'returns': {}}))",
+]
+
+
+async def test_missing_return_field_leaves_parent_unchanged():
+    # The child does not produce `prob_bits_0`; the parent's `prob` keeps its
+    # default, and on_done still drives the machine to its final state.
+    machine = OrcaMachine(definition=parse_orca_md(_TRAINER))
+    machine.register_foreign_runner("QForward", _EMPTY_RETURNS_RUNNER)
+    await machine.start()
+    assert machine.context["prob"] == 0.0  # unchanged default
+    assert machine.state.leaf() == "stepped"
+    await machine.stop()

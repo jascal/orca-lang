@@ -115,6 +115,14 @@ Both forms parse to the same `InvokeDef`.
 
 AST: `InvokeDef` gains `returns?: Record<string,string>` and `shots?: number`.
 
+**Binding semantics.** A bound value **overwrites** the parent field named on the
+binding's LHS (expected to be a declared parent context key). A return the child
+**did not produce** is **skipped** — the binding is *soft*, leaving the parent
+field at its current value rather than raising — so a child that, say, omits an
+optional aggregate does not abort the parent run. A genuinely wrong shape (a
+malformed result envelope, or a `protocol_version` the parent cannot read) is a
+*hard* `BridgeError`, distinct from a missing field.
+
 ### 3. Bridge implementation (the q-orca protocol)
 
 Implement orca's side of the three JSON envelopes from the q-orca spec:

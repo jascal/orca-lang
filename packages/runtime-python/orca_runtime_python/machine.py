@@ -339,6 +339,10 @@ class OrcaMachine:
             await _emit_error(result["error"])
             return
 
+        # Bind returns into the parent context. Precedence: a bound value
+        # overwrites the parent field named on the binding's LHS (the field is
+        # expected to be a declared parent context key). A return the child did
+        # not produce is skipped, leaving the parent field at its current value.
         if invoke_def.returns:
             for parent_field, child_return in invoke_def.returns.items():
                 if child_return in result["returns"]:
