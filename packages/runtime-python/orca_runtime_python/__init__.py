@@ -10,6 +10,8 @@ from .types import (
     GuardDef,
     ActionSignature,
     EffectDef,
+    ReturnDef,
+    InvokeDef,
     MachineDef,
     StateValue,
     Context,
@@ -29,6 +31,17 @@ from .machine import OrcaMachine, MachineNotActiveError, TransitionResult
 
 from .parser import parse_orca_md, parse_orca_auto
 
+from .bridge import (
+    BRIDGE_PROTOCOL_VERSION,
+    BridgeError,
+    descriptor_for,
+    build_invocation,
+    make_result,
+    parse_result,
+    parse_invocation,
+    dispatch_foreign,
+)
+
 from .persistence import PersistenceAdapter, AsyncPersistenceAdapter, FilePersistence
 
 from .logging import LogSink, FileSink, ConsoleSink, MultiSink
@@ -42,6 +55,8 @@ __all__ = [
     "GuardDef",
     "ActionSignature",
     "EffectDef",
+    "ReturnDef",
+    "InvokeDef",
     "MachineDef",
     "StateValue",
     "Context",
@@ -60,6 +75,15 @@ __all__ = [
     # Parser
     "parse_orca_md",
     "parse_orca_auto",
+    # Bridge (cross-tool composition)
+    "BRIDGE_PROTOCOL_VERSION",
+    "BridgeError",
+    "descriptor_for",
+    "build_invocation",
+    "make_result",
+    "parse_result",
+    "parse_invocation",
+    "dispatch_foreign",
     # Persistence
     "PersistenceAdapter",
     "AsyncPersistenceAdapter",

@@ -33,6 +33,25 @@ class InvokeDef:
     input: dict[str, str] | None = None
     on_done: str | None = None
     on_error: str | None = None
+    # Cross-tool extensions (cross-tool-bridge-protocol): bind child returns into
+    # parent context (parent_field -> child_return), and a shots count for a
+    # measurement-bearing (foreign quantum) child.
+    returns: dict[str, str] | None = None
+    shots: int | None = None
+
+
+@dataclass
+class ReturnDef:
+    """A value a machine exposes to a caller via its ## returns section.
+
+    `name` is a context field (or an indexed reference like ``bits[0]`` for a
+    bridged quantum child); `statistics` is a subset of
+    {expectation, histogram, variance}, valid only on a measurement-bearing
+    machine.
+    """
+    name: str
+    type: str
+    statistics: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -99,6 +118,7 @@ class MachineDef:
     guards: dict[str, GuardExpression] = field(default_factory=dict)
     actions: list[ActionSignature] = field(default_factory=list)
     effects: list[EffectDef] = field(default_factory=list)
+    returns: list[ReturnDef] = field(default_factory=list)
     version: str = "0.1.0"
 
 
