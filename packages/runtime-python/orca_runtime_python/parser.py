@@ -31,7 +31,10 @@ from .types import (
     RegionDef,
     ParallelDef,
     InvokeDef,
+    ReturnDef,
 )
+
+_RETURN_STATISTICS = frozenset({"expectation", "histogram", "variance"})
 
 
 class ParseError(Exception):
@@ -219,6 +222,20 @@ class _MdStateEntry:
     ignored_events: list[str] = field(default_factory=list)
     invoke: InvokeDef | None = None
     _pending_on_error: str | None = None  # temp: on_error parsed before invoke
+    _pending_returns: dict[str, str] | None = None  # temp: returns parsed before invoke
+
+
+def _parse_brace_map(text: str, key: str) -> dict[str, str] | None:
+    """Parse `key: { a: b, c: d }` out of `text`; None if absent."""
+    m = re.search(key + r":\s*\{([^}]*)\}", text)
+    if not m:
+        return None
+    out: dict[str, str] = {}
+    for pair in m.group(1).split(","):
+        if ":" in pair:
+            k, v = pair.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
 
 
 def _parse_md_state_bullet(entry: _MdStateEntry, text: str) -> None:
@@ -260,26 +277,37 @@ def _parse_md_state_bullet(entry: _MdStateEntry, text: str) -> None:
         entry._pending_on_error = val
         if entry.invoke:
             entry.invoke.on_error = val
+    elif text.startswith("returns:") and entry.invoke is not None:
+        # Multi-line form: `- returns: { parent: child, ... }` after the invoke.
+        entry.invoke.returns = _parse_brace_map(text, "returns")
+    elif text.startswith("returns:"):
+        # returns bullet seen before the invoke bullet — stash it.
+        entry._pending_returns = _parse_brace_map(text, "returns")
     elif text.startswith("invoke:"):
-        rest = text[7:].strip()  # "MachineName" or "MachineName input: { ... }"
-        machine_name = rest
-        input_map: dict[str, str] | None = None
+        rest = text[7:].strip()
+        # Inline modifiers: `Child input: {...} shots: N returns: {...}`.
+        input_map = _parse_brace_map(rest, "input")
+        returns_map = _parse_brace_map(rest, "returns")
+        shots = None
+        shots_match = re.search(r"shots:\s*(\d+)", rest)
+        if shots_match:
+            shots = int(shots_match.group(1))
+        # The machine name is the text before the first modifier keyword.
+        cut = len(rest)
+        for kw in ("input:", "returns:", "shots:"):
+            idx = rest.find(kw)
+            if idx != -1:
+                cut = min(cut, idx)
+        machine_name = rest[:cut].strip()
 
-        # Check for input mapping
-        input_match = re.search(r"input:\s*\{([^}]+)\}", rest)
-        if input_match:
-            machine_name = rest[:input_match.start()].strip()
-            input_str = input_match.group(1)
-            input_map = {}
-            for pair in input_str.split(","):
-                if ":" in pair:
-                    key, value = pair.split(":", 1)
-                    input_map[key.strip()] = value.strip()
-
-        entry.invoke = InvokeDef(machine=machine_name, input=input_map)
-        # Apply pending on_error if we already parsed it
+        entry.invoke = InvokeDef(
+            machine=machine_name, input=input_map, returns=returns_map, shots=shots
+        )
+        # Apply anything parsed before the invoke bullet.
         if entry._pending_on_error:
             entry.invoke.on_error = entry._pending_on_error
+        if entry._pending_returns and entry.invoke.returns is None:
+            entry.invoke.returns = entry._pending_returns
 
 
 def _build_md_states_at_level(
@@ -704,6 +732,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
     transitions: list[Transition] = []
     guards: dict[str, GuardExpression] = {}
     actions: list[ActionSignature] = []
+    returns: list[ReturnDef] = []
     effects: list[EffectDef] = []
     state_entries: list[_MdStateEntry] = []
     current_state_entry: _MdStateEntry | None = None
@@ -727,7 +756,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
 
             # Section headings
             section_name = el.text.lower()
-            if section_name in ("context", "events", "transitions", "guards", "actions", "effects"):
+            if section_name in ("context", "events", "transitions", "guards", "actions", "effects", "returns"):
                 current_state_entry = None
                 next_el = elements[i + 1] if i + 1 < len(elements) else None
 
@@ -815,6 +844,25 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
                     i += 2
                     continue
 
+                elif section_name == "returns" and isinstance(next_el, _MdTable):
+                    ni = _find_column_index(next_el.headers, "name")
+                    ti = _find_column_index(next_el.headers, "type")
+                    si = _find_column_index(next_el.headers, "statistics")
+                    for row in next_el.rows:
+                        name = _strip_backticks(row[ni].strip() if ni >= 0 and ni < len(row) else "")
+                        if not name:
+                            continue
+                        type_str = _strip_backticks(row[ti].strip() if ti >= 0 and ti < len(row) else "")
+                        stats: list[str] = []
+                        if si >= 0 and si < len(row):
+                            for s in row[si].split(","):
+                                s = _strip_backticks(s.strip()).strip().lower()
+                                if s and s in _RETURN_STATISTICS:
+                                    stats.append(s)
+                        returns.append(ReturnDef(name=name, type=type_str, statistics=stats))
+                    i += 2
+                    continue
+
                 i += 1
                 continue
 
@@ -879,6 +927,7 @@ def _parse_machine_elements(elements: list[_MdElement]) -> MachineDef:
         guards=guards,
         actions=actions,
         effects=effects,
+        returns=returns,
         version=machine_version,
     )
     _validate_machine_def(defn)

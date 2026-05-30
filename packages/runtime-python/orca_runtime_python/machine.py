@@ -35,6 +35,7 @@ from .types import (
 )
 from .bus import EventBus, Event, EventType, get_event_bus
 from .persistence import PersistenceAdapter, AsyncPersistenceAdapter
+from .bridge import BridgeError, build_invocation, dispatch_foreign
 
 
 # Type alias for transition callback
@@ -114,6 +115,9 @@ class OrcaMachine:
         # Child machine management
         self._child_machines: dict[str, OrcaMachine] = {}
         self._sibling_machines: dict[str, MachineDef] | None = None
+        # Cross-tool bridge: child name -> runner argv for a foreign (other-tool)
+        # child dispatched over the bridge instead of run as a local machine.
+        self._foreign_runners: dict[str, list[str]] = {}
         self._active_invoke: str | None = None
 
     def _get_initial_state(self) -> str:
@@ -240,15 +244,26 @@ class OrcaMachine:
         for leaf in self._state.leaves():
             self._start_timeout_for_state(leaf)
 
+    def register_foreign_runner(self, machine_name: str, runner_argv: list[str]) -> None:
+        """Register a foreign (other-tool) child, invoked over the bridge.
+
+        When an invoke targets `machine_name` and it is not a local sibling, the
+        runtime dispatches it via `runner_argv` (e.g. ``["q-orca", "run",
+        "forward.q.orca.md", "--bridge"]``) instead of starting a local machine.
+        """
+        self._foreign_runners[machine_name] = list(runner_argv)
+
     def register_machines(self, machines: dict[str, MachineDef]) -> None:
         """Register sibling machines for invocation."""
         self._sibling_machines = machines
 
     async def start_child_machine(self, state_name: str, invoke_def: InvokeDef) -> None:
         """Start a child machine as part of an invoke state."""
-        if self._sibling_machines is None:
-            return
-        if invoke_def.machine not in self._sibling_machines:
+        siblings = self._sibling_machines or {}
+        if invoke_def.machine not in siblings:
+            # Foreign (other-tool) child → dispatch over the bridge.
+            if invoke_def.machine in self._foreign_runners:
+                await self._invoke_foreign(invoke_def)
             return
 
         child_def = self._sibling_machines[invoke_def.machine]
@@ -290,6 +305,50 @@ class OrcaMachine:
 
         child.on_transition = on_transition_handler
         await child.start()
+
+    async def _invoke_foreign(self, invoke_def: InvokeDef) -> None:
+        """Dispatch an invoke to a foreign (other-tool) child over the bridge.
+
+        Builds the invocation envelope from the parent context (via `input`),
+        runs the foreign runner off the event loop, binds the child's declared
+        returns into the parent context, and emits `on_done` / `on_error`.
+        """
+        args: dict[str, Any] = {}
+        if invoke_def.input:
+            for child_param, parent_expr in invoke_def.input.items():
+                field_name = parent_expr.replace("ctx.", "")
+                args[child_param] = self.context.get(field_name)
+        envelope = build_invocation(
+            invoke_def.machine, args, invoke_def.shots, invoke_def.returns or {}
+        )
+        runner = self._foreign_runners[invoke_def.machine]
+
+        async def _emit_error(error: dict[str, Any]) -> None:
+            if invoke_def.on_error:
+                await self.send(invoke_def.on_error, {"child": invoke_def.machine, "error": error})
+
+        loop = asyncio.get_event_loop()
+        try:
+            result = await loop.run_in_executor(
+                None, dispatch_foreign, list(runner), envelope
+            )
+        except BridgeError as exc:
+            await _emit_error({"code": exc.code, "message": str(exc)})
+            return
+        if result.get("error"):
+            await _emit_error(result["error"])
+            return
+
+        if invoke_def.returns:
+            for parent_field, child_return in invoke_def.returns.items():
+                if child_return in result["returns"]:
+                    self.context[parent_field] = result["returns"][child_return]
+        if invoke_def.on_done:
+            await self.send(invoke_def.on_done, {
+                "child": invoke_def.machine,
+                "final_state": result["final_state"],
+                "returns": result["returns"],
+            })
 
     async def stop_child_machine(self, state_name: str) -> None:
         """Stop a child machine associated with a state."""

@@ -266,6 +266,52 @@ and binds the synthesized `prob_bits_0` into the trainer's `prob`. (The q-orca
 side is the `composed_predictive_coder` fixture, which already runs in-tool via
 `q-orca run`.)
 
+## Multi-Runtime Adoption
+
+Orca ships four runtimes (`runtime-python`, `runtime-ts`, `runtime-go`,
+`runtime-rust`). The bridge is **runtime-agnostic by construction**: the entire
+contract is three JSON envelopes (descriptor / invocation / result) plus a
+`protocol_version` constant, carried over a **process boundary** — no shared AST,
+no FFI, no language-specific types. Every language can serialize JSON and spawn a
+subprocess, so any runtime can implement it; the protocol is not even
+orca-specific (any tool that speaks the envelopes can join).
+
+**What a runtime needs** (the same shape everywhere — mirroring `runtime-python`):
+
+1. **Parser** — recognize `## returns` and the invoke `returns:` / `shots:`
+   modifiers (each runtime has its own parser).
+2. **Envelopes** — serialize/deserialize the three shapes + a `protocol_version`
+   check (`encoding/json`, `serde_json`, `JSON.parse`, …).
+3. **`dispatch_foreign`** — spawn the child runner, pipe the invocation envelope
+   to stdin, read the result envelope from stdout (`os/exec`, `std::process`,
+   `child_process`).
+4. **One dispatch hook** — a foreign-runner registry consulted where the invoke
+   target is not a local sibling (in `runtime-python` this is the
+   `start_child_machine` foreign branch; every runtime has the equivalent).
+
+**Direction asymmetry.** *Outbound* (a runtime as the classical orchestrator
+invoking a quantum child) is cheap and clean in any language — and is the
+motivating case; the foreign child is essentially always a **q-orca (Python)**
+process via `q-orca run --bridge`, since q-orca is the only quantum side.
+*Inbound* (a runtime serving as the invoked child) is symmetric at the protocol
+level, but orca machines are **reactive/event-driven**, so "run to completion as
+a child" needs a per-runtime auto-driver — a real work item independent of
+language. (`runtime-python` therefore scopes its first cut to outbound.)
+
+**Why do it in more than one runtime.** The contract is identical, so a **shared
+conformance suite** — every runtime checked against the *same* fixture envelopes
+and the same `1.0` constant — is what keeps four independent implementations from
+silently drifting. Each runtime then gives its own users (Go/Rust/TS
+orchestrators) the same hybrid classical↔quantum capability.
+
+**When it's worth it.** For parity, or a specific deployment (a Go service
+dispatching quantum jobs; the Rust runtime's C/Fortran FFI callers reaching a
+quantum child transitively). It may *not* be urgent where the real demand is "an
+ML/training loop drives a quantum forward pass" — Python is the natural
+orchestration language there, so `runtime-python` likely covers most actual
+usage, and the others are completeness rather than need-driven until a concrete
+consumer appears.
+
 ## Open Questions
 
 1. **How does the verifier know a local `.q.orca.md` child is
