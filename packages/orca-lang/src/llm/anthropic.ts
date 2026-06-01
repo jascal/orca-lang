@@ -14,11 +14,13 @@ export class AnthropicProvider implements LLMProvider {
     this.maxTokens = config.max_tokens || 4096;
     this.temperature = config.temperature ?? 0.7;
 
-    // MiniMax uses Bearer token auth, Anthropic uses x-api-key
-    // Also check ORCA_API_KEY (set via the MCP server env block in Claude Code)
+    // MiniMax's Anthropic-compatible endpoint (api.minimax.io/anthropic) authenticates
+    // exactly like Anthropic — via the x-api-key header — not Bearer. (The OpenAI-compatible
+    // MiniMax endpoint at minimaxi.chat uses Bearer, but that path goes through openai.ts.)
+    // Also check ORCA_API_KEY (set via the MCP server env block in Claude Code).
     if (this.baseUrl.includes('minimax.io')) {
       this.apiKey = config.api_key || process.env.ORCA_API_KEY || process.env.MINIMAX_API_KEY || process.env.ANTHROPIC_API_KEY || '';
-      this.authType = 'bearer';
+      this.authType = 'x-api-key';
     } else {
       this.apiKey = config.api_key || process.env.ORCA_API_KEY || process.env.ANTHROPIC_API_KEY || '';
       this.authType = 'x-api-key';
