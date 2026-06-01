@@ -451,7 +451,7 @@ For an OpenAI-compatible provider (e.g. MiniMax):
         "ORCA_API_KEY": "<your-api-key>",
         "ORCA_PROVIDER": "openai",
         "ORCA_BASE_URL": "https://api.minimaxi.chat/v1",
-        "ORCA_MODEL": "MiniMax-M2.7"
+        "ORCA_MODEL": "MiniMax-M3"
       }
     }
   }
