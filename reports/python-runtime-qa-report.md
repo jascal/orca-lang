@@ -31,9 +31,9 @@ scoped to the Python-runtime findings, which are real.
 | RT-14 | Ordered guard comparisons (`<`,`>`,`<=`,`>=`) fall back to string compare on non-numeric / `None` → fail **open** | MEDIUM | **Fixed** (regression test) |
 
 **Resolution (2026-06-02):** All four fixed in `packages/runtime-python/orca_runtime_python/machine.py`,
-with regression tests in `packages/runtime-python/tests/test_qa_fixes.py` (9 tests) and the fixes
+with regression tests in `packages/runtime-python/tests/test_qa_fixes.py` (10 tests) and the fixes
 documented in `docs/runtime-python-production-hardening.md`. RT-12 + RT-14 were fixed together (RT-14
-masked RT-12). Full suite: 115 passed.
+masked RT-12). Full suite: 116 passed.
 
 Severities are re-ranked from the source list: RT-12 fails *open* (a guard passes
 when it should deny), which is a correctness/security landmine, not "LOW".

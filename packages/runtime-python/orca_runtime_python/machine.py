@@ -363,7 +363,9 @@ class OrcaMachine:
                 warnings.warn(
                     f"Cannot rehydrate child '{invoke_def.machine}' for state "
                     f"'{state_name}' in machine '{self.definition.name}': sibling "
-                    "definition not registered (call register_machines before resume).",
+                    "definition not registered. Call "
+                    f"register_machines({{'{invoke_def.machine}': <MachineDef>}}) "
+                    "before resume()/restore().",
                     UserWarning,
                     stacklevel=2,
                 )
@@ -860,8 +862,9 @@ class OrcaMachine:
 
         A path whose leading segment is `event` or `payload` resolves against the
         triggering event's payload; otherwise it resolves against the machine
-        context. A leading `ctx` / `context` segment is the (optional) explicit
-        context prefix. If an `event.*` guard fires with no event in scope (or no
+        context. Any `ctx` / `context` path segment is treated as the explicit
+        context-root prefix and skipped (so `ctx.amount` and `amount` are
+        equivalent). If an `event.*` guard fires with no event in scope (or no
         matching payload key), the reference resolves to None.
         """
         path = ref.path

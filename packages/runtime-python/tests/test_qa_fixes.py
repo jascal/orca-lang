@@ -61,12 +61,61 @@ async def _test_rt12_event_guard_approves_large_payload():
     assert m.state == "approved", f"event.amount>100 with amount=200 should approve, got {m.state}"
 
 
+RT12_MIXED_MD = """# machine mixed
+
+## context
+
+| Field | Type | Default |
+|-------|------|---------|
+| limit | number | 100 |
+
+## events
+
+- PAY
+
+## state idle [initial]
+## state approved [final]
+## state denied [final]
+
+## guards
+
+| Name | Expression |
+|------|------------|
+| over | `event.amount > ctx.limit` |
+
+## transitions
+
+| Source | Event | Guard | Target |
+|--------|-------|-------|--------|
+| idle | PAY | over | approved |
+| idle | PAY |     | denied   |
+"""
+
+
+async def _test_rt12_mixed_event_and_ctx_operands():
+    # One comparison touches BOTH resolution paths: LHS is an event payload
+    # field, RHS is a context field. Guards both that event and ctx resolve.
+    over = OrcaMachine(parse_orca_md(RT12_MIXED_MD), event_bus=EventBus(), context={"limit": 100})
+    await over.start()
+    await over.send("PAY", {"amount": 200})
+    assert over.state == "approved", f"event.amount(200) > ctx.limit(100) should approve, got {over.state}"
+
+    under = OrcaMachine(parse_orca_md(RT12_MIXED_MD), event_bus=EventBus(), context={"limit": 100})
+    await under.start()
+    await under.send("PAY", {"amount": 50})
+    assert under.state == "denied", f"event.amount(50) > ctx.limit(100) should deny, got {under.state}"
+
+
 def test_rt12_event_guard_denies_small_payload():
     asyncio.run(_test_rt12_event_guard_denies_small_payload())
 
 
 def test_rt12_event_guard_approves_large_payload():
     asyncio.run(_test_rt12_event_guard_approves_large_payload())
+
+
+def test_rt12_mixed_event_and_ctx_operands():
+    asyncio.run(_test_rt12_mixed_event_and_ctx_operands())
 
 
 # --------------------------------------------------------------------------
@@ -271,6 +320,7 @@ if __name__ == "__main__":
     tests = [
         ("RT-12 event guard denies small payload", test_rt12_event_guard_denies_small_payload),
         ("RT-12 event guard approves large payload", test_rt12_event_guard_approves_large_payload),
+        ("RT-12 mixed event.* and ctx.* operands", test_rt12_mixed_event_and_ctx_operands),
         ("RT-14 None fails closed", test_rt14_ordered_compare_none_fails_closed),
         ("RT-14 non-numeric fails closed", test_rt14_ordered_compare_nonnumeric_fails_closed),
         ("RT-14 numeric string still compares", test_rt14_numeric_string_still_compares),
