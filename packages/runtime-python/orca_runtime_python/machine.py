@@ -173,6 +173,9 @@ class OrcaMachine:
         self._state = StateValue(copy.deepcopy(snap["state"]))
         self.context = copy.deepcopy(snap["context"])
 
+        # Rehydrate invoked child machines and the active-invoke marker.
+        await self._resume_children(snap)
+
         # If machine was active, restart timeouts for current leaf states
         if self._active:
             for leaf in self._state.leaves():
@@ -241,6 +244,11 @@ class OrcaMachine:
             }
         ))
 
+        # Rehydrate invoked child machines and the active-invoke marker, so a
+        # machine that crashed inside an invoke state resumes with its child
+        # running rather than wedged with active_invoke=None.
+        await self._resume_children(snap)
+
         for leaf in self._state.leaves():
             self._start_timeout_for_state(leaf)
 
@@ -283,10 +291,21 @@ class OrcaMachine:
         )
         self._child_machines[state_name] = child
         self._active_invoke = state_name
+        child.on_transition = self._make_child_done_handler(state_name, invoke_def)
+        await child.start()
 
-        # Set up completion/error listeners
+    def _make_child_done_handler(self, state_name: str, invoke_def: InvokeDef) -> TransitionCallback:
+        """Build the on_transition handler that fires `on_done` when an invoked
+        child reaches a final state, then stops and detaches it.
+
+        Shared by the start path (`start_child_machine`) and the resume path
+        (`_resume_children`) so a rehydrated child completes the same way.
+        """
         async def on_transition_handler(old: StateValue, new: StateValue) -> None:
             if new.is_compound():
+                return
+            child = self._child_machines.get(state_name)
+            if child is None:
                 return
             child_state = new.leaf()
             child_state_def = child._find_state_def(child_state)
@@ -303,8 +322,63 @@ class OrcaMachine:
                 if self._active_invoke == state_name:
                     self._active_invoke = None
 
-        child.on_transition = on_transition_handler
-        await child.start()
+        return on_transition_handler
+
+    async def _resume_children(self, snap: dict[str, Any]) -> None:
+        """Rehydrate invoked child machines and the active-invoke marker.
+
+        Restores `_active_invoke` and, for each child snapshot under
+        `snap["children"]`, re-instantiates the child machine from its sibling
+        definition, re-attaches the completion handler, and resumes it from its
+        own snapshot (recursively).
+
+        Preconditions: sibling definitions (`register_machines`) must be
+        registered before resume()/restore(). A child snapshot whose state has no
+        invoke definition, or whose target machine is not a registered sibling,
+        is skipped with a warning rather than silently dropped.
+        """
+        import warnings
+
+        # Clear any pre-existing children before rehydrating from the snapshot.
+        for existing in list(self._child_machines.values()):
+            await existing.stop()
+        self._child_machines.clear()
+
+        self._active_invoke = snap.get("active_invoke")
+        children = snap.get("children") or {}
+        siblings = self._sibling_machines or {}
+
+        for state_name, child_snap in children.items():
+            state_def = self._find_state_def(state_name)
+            invoke_def = state_def.invoke if state_def else None
+            if invoke_def is None:
+                warnings.warn(
+                    f"Cannot rehydrate child for state '{state_name}' in machine "
+                    f"'{self.definition.name}': no invoke definition found.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            if invoke_def.machine not in siblings:
+                warnings.warn(
+                    f"Cannot rehydrate child '{invoke_def.machine}' for state "
+                    f"'{state_name}' in machine '{self.definition.name}': sibling "
+                    "definition not registered. Call "
+                    f"register_machines({{'{invoke_def.machine}': <MachineDef>}}) "
+                    "before resume()/restore().",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            child_def = siblings[invoke_def.machine]
+            child = OrcaMachine(
+                definition=child_def,
+                event_bus=self.event_bus,
+                context=dict(child_def.context),
+            )
+            self._child_machines[state_name] = child
+            child.on_transition = self._make_child_done_handler(state_name, invoke_def)
+            await child.resume(child_snap)
 
     async def _invoke_foreign(self, invoke_def: InvokeDef) -> None:
         """Dispatch an invoke to a foreign (other-tool) child over the bridge.
@@ -469,7 +543,7 @@ class OrcaMachine:
         last_guard_name = None
         for candidate in candidates:
             if candidate.guard:
-                guard_passed = await self._evaluate_guard(candidate.guard)
+                guard_passed = await self._evaluate_guard(candidate.guard, evt)
                 if guard_passed:
                     transition = candidate
                     break
@@ -751,38 +825,56 @@ class OrcaMachine:
                 if self.on_transition:
                     await self.on_transition(old_state, self._state)
 
-    async def _evaluate_guard(self, guard_name: str) -> bool:
-        """Evaluate a guard by name."""
+    async def _evaluate_guard(self, guard_name: str, event: Event | None = None) -> bool:
+        """Evaluate a guard by name.
+
+        `event` is the triggering event; it is threaded through so guards may
+        reference the event payload (e.g. `event.amount > 100`).
+        """
         # Guards are defined in definition.guards
         if guard_name not in self.definition.guards:
             return True  # Unknown guard = allow
 
         # Evaluate the guard expression
         guard_expr = self.definition.guards[guard_name]
-        return await self._eval_guard(guard_expr)
+        return await self._eval_guard(guard_expr, event)
 
-    async def _eval_guard(self, expr: GuardExpression) -> bool:
-        """Evaluate a guard expression against the machine context."""
+    async def _eval_guard(self, expr: GuardExpression, event: Event | None = None) -> bool:
+        """Evaluate a guard expression against the machine context and event."""
         if isinstance(expr, GuardTrue):
             return True
         if isinstance(expr, GuardFalse):
             return False
         if isinstance(expr, GuardNot):
-            return not await self._eval_guard(expr.expr)
+            return not await self._eval_guard(expr.expr, event)
         if isinstance(expr, GuardAnd):
-            return await self._eval_guard(expr.left) and await self._eval_guard(expr.right)
+            return await self._eval_guard(expr.left, event) and await self._eval_guard(expr.right, event)
         if isinstance(expr, GuardOr):
-            return await self._eval_guard(expr.left) or await self._eval_guard(expr.right)
+            return await self._eval_guard(expr.left, event) or await self._eval_guard(expr.right, event)
         if isinstance(expr, GuardCompare):
-            return self._eval_compare(expr.op, expr.left, expr.right)
+            return self._eval_compare(expr.op, expr.left, expr.right, event)
         if isinstance(expr, GuardNullcheck):
-            return self._eval_nullcheck(expr.expr, expr.is_null)
+            return self._eval_nullcheck(expr.expr, expr.is_null, event)
         return True
 
-    def _resolve_variable(self, ref: VariableRef) -> Any:
-        """Resolve a variable path against the machine context."""
-        current: Any = self.context
-        for part in ref.path:
+    def _resolve_variable(self, ref: VariableRef, event: Event | None = None) -> Any:
+        """Resolve a variable path against the machine context or triggering event.
+
+        A path whose leading segment is `event` or `payload` resolves against the
+        triggering event's payload; otherwise it resolves against the machine
+        context. Any `ctx` / `context` path segment is treated as the explicit
+        context-root prefix and skipped (so `ctx.amount` and `amount` are
+        equivalent). If an `event.*` guard fires with no event in scope (or no
+        matching payload key), the reference resolves to None.
+        """
+        path = ref.path
+        if path and path[0] in ("event", "payload"):
+            current: Any = event.payload if event is not None else None
+            rest = path[1:]
+        else:
+            current = self.context
+            rest = path
+        for part in rest:
             # Skip "ctx" or "context" prefix — context is already the root
             if part in ("ctx", "context"):
                 continue
@@ -798,54 +890,78 @@ class OrcaMachine:
         """Resolve a ValueRef to its Python value."""
         return ref.value
 
-    def _eval_compare(self, op: str, left: VariableRef, right: "ValueRef | VariableRef") -> bool:
-        """Evaluate a comparison guard."""
-        lhs = self._resolve_variable(left)
-        rhs = self._resolve_variable(right) if isinstance(right, VariableRef) else self._resolve_value(right)
+    def _resolve_operand(self, ref: "ValueRef | VariableRef", event: Event | None) -> Any:
+        """Resolve either side of a comparison to a concrete value."""
+        if isinstance(ref, VariableRef):
+            return self._resolve_variable(ref, event)
+        return self._resolve_value(ref)
 
-        # Try numeric comparison
-        try:
-            lnum = float(lhs) if not isinstance(lhs, (int, float)) else lhs
-            rnum = float(rhs) if not isinstance(rhs, (int, float)) else rhs
-            both_numeric = True
-        except (TypeError, ValueError):
-            both_numeric = False
-            lnum = rnum = 0
+    def _eval_compare(
+        self,
+        op: str,
+        left: VariableRef,
+        right: "ValueRef | VariableRef",
+        event: Event | None = None,
+    ) -> bool:
+        """Evaluate a comparison guard.
+
+        Equality (`eq`/`ne`) is well-defined on mixed types and is compared
+        directly. Ordered comparisons (`lt`/`gt`/`le`/`ge`) require BOTH operands
+        to be numeric (numeric-looking strings are coerced); if either operand is
+        None or non-numeric the guard evaluates to False (fail closed) rather than
+        silently falling back to a lexicographic string compare.
+        """
+        lhs = self._resolve_operand(left, event)
+        rhs = self._resolve_operand(right, event)
 
         if op == "eq":
             return lhs == rhs
         if op == "ne":
             return lhs != rhs
+
+        # Ordered comparisons: require numeric operands, else fail closed.
+        try:
+            lnum = float(lhs) if not isinstance(lhs, (int, float)) else lhs
+            rnum = float(rhs) if not isinstance(rhs, (int, float)) else rhs
+        except (TypeError, ValueError):
+            return False
+
         if op == "lt":
-            return lnum < rnum if both_numeric else str(lhs) < str(rhs)
+            return lnum < rnum
         if op == "gt":
-            return lnum > rnum if both_numeric else str(lhs) > str(rhs)
+            return lnum > rnum
         if op == "le":
-            return lnum <= rnum if both_numeric else str(lhs) <= str(rhs)
+            return lnum <= rnum
         if op == "ge":
-            return lnum >= rnum if both_numeric else str(lhs) >= str(rhs)
+            return lnum >= rnum
         return False
 
-    def _eval_nullcheck(self, expr: VariableRef, is_null: bool) -> bool:
+    def _eval_nullcheck(self, expr: VariableRef, is_null: bool, event: Event | None = None) -> bool:
         """Evaluate a null check guard."""
-        val = self._resolve_variable(expr)
+        val = self._resolve_variable(expr, event)
         value_is_null = val is None
         return value_is_null if is_null else not value_is_null
 
     async def _execute_entry_actions(self, state_name: str) -> None:
-        """Execute on_entry action for a state."""
+        """Execute a state's on_entry action, then start any invoked child machine.
+
+        A state may declare BOTH `on_entry` and `invoke`. The entry action runs
+        first (matching XState, where entry actions precede invoked services),
+        then the child machine is started — neither is dropped.
+        """
         state_def = self._find_state_def(state_name)
         if not state_def:
             return
 
-        # Handle invoke - start child machine if present
+        if state_def.on_entry:
+            await self._run_on_entry(state_def)
+
+        # Start child machine if this state invokes one (after on_entry).
         if state_def.invoke:
             await self.start_child_machine(state_name, state_def.invoke)
-            return  # Don't execute on_entry if invoke is set
 
-        if not state_def.on_entry:
-            return
-
+    async def _run_on_entry(self, state_def: StateDef) -> None:
+        """Run a state's on_entry action (as an effect or a plain handler)."""
         action_def = self._find_action_def(state_def.on_entry)
         if action_def and action_def.has_effect:
             # Execute as effect via event bus

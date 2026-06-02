@@ -363,5 +363,77 @@ When an `on_entry` action has `has_effect=True`, the effect result data is (a) m
 | M-1 | Minor | `parser.py` | Post-parse structural validation with informative `ParseError` messages |
 | M-2 | Minor | `machine.py` | `to_state_leaf` field on `TransitionResult` |
 | M-3 | Minor | `README.md` | Document `EFFECT_COMPLETED` event payload structure |
+| RT-12 | **Required** | `machine.py` | Thread the triggering event through guard evaluation so `event.*` guards resolve against the payload |
+| RT-14 | **Required** | `machine.py` | Ordered guard comparisons fail closed on `None`/non-numeric operands instead of lexicographic fallback |
+| RT-06 | Recommended | `machine.py` | Run `on_entry` before starting an invoked child, instead of dropping it |
+| RT-07 | Recommended | `machine.py` | `resume()`/`restore()` rehydrate invoked child machines and `active_invoke` |
 
 Gaps 1 and 2 should ship together — both are required for any deployment that persists machine state externally. Gaps 3 and 4 can follow independently. The minor improvements are best batched into a single small PR to avoid noise.
+
+---
+
+## Runtime correctness fixes — QA report (RT-06, RT-07, RT-12, RT-14)
+
+Four runtime bugs surfaced by the QA pass in `reports/python-runtime-qa-report.md`.
+All four were reproduced end-to-end through `parse_orca_md` + `OrcaMachine` and are
+covered by regression tests in `tests/test_qa_fixes.py`. RT-12 and RT-14 interact
+(RT-14 masked RT-12) and were fixed together.
+
+### RT-12 — `event.*` guards resolve against the event payload
+
+**Classification: Required fix**
+
+A guard such as `event.amount > 100` parsed to a path `["event", "amount"]`, but
+guard evaluation took no event and `_resolve_variable` walked `self.context` only,
+so the reference resolved to `context["event"]` → `None`. The guard was insensitive
+to the payload (and, via RT-14, tended to pass).
+
+**Fix**: the triggering `Event` is threaded through `_evaluate_guard` →
+`_eval_guard` → `_eval_compare`/`_eval_nullcheck` → `_resolve_variable`. A variable
+path whose leading segment is `event` or `payload` now resolves against the event's
+payload; everything else resolves against context as before. An `event.*` reference
+with no event in scope (or no matching payload key) resolves to `None`.
+
+### RT-14 — ordered comparisons fail closed
+
+**Classification: Required fix**
+
+`_eval_compare` fell back to a lexicographic `str(lhs) > str(rhs)` when an operand
+was not numeric. So `<None> > 100` became `"None" > "100"` → `True` — an ordered
+guard over a missing/null context field passed spuriously (fail **open**).
+
+**Fix**: ordered comparisons (`lt`/`gt`/`le`/`ge`) require both operands to be
+numeric (numeric-looking strings are still coerced via `float()`); if either operand
+is `None` or non-numeric the comparison evaluates to `False` (fail **closed**).
+Equality (`eq`/`ne`) is unchanged — it is well-defined on mixed types.
+
+### RT-06 — `on_entry` runs alongside `invoke`
+
+**Classification: Recommended fix**
+
+`_execute_entry_actions` returned early when a state declared `invoke`, silently
+discarding that state's `on_entry` action.
+
+**Fix**: the entry action runs first, then the child machine is started — matching
+XState, where entry actions precede invoked services. A state may declare both;
+neither is dropped. (Entry-action execution was factored into `_run_on_entry`.)
+
+### RT-07 — `resume()`/`restore()` rehydrate children and `active_invoke`
+
+**Classification: Recommended fix**
+
+`snapshot()` already persisted `children` and `active_invoke`, but `resume()` and
+`restore()` restored only state, context, and timeouts. A machine that crashed
+inside an invoke state resumed with no child running and `active_invoke = None` —
+nothing could drive it to `on_done`, so it was permanently wedged.
+
+**Fix**: `_resume_children()` restores `active_invoke` and, for each child snapshot,
+re-instantiates the child from its sibling definition, re-attaches the completion
+handler (factored out as `_make_child_done_handler`), and recursively `resume()`s it
+from its own snapshot. Both `resume()` and `restore()` call it.
+
+**Precondition** (resume/persistence contract): sibling definitions
+(`register_machines`) and this machine's action handlers must be re-registered
+*before* `resume()`/`restore()`. A child snapshot whose target machine is not a
+registered sibling (or whose state has no invoke definition) is skipped with a
+`UserWarning` rather than silently dropped or raised.
