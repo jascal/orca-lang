@@ -6,6 +6,21 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.29] — 2026-06-02
+
+### Fixed
+
+- `packages/runtime-python`: four QA findings from `reports/python-runtime-qa-report.md` (RT-06/07/12/14), reproduced end-to-end and covered by 10 regression tests in `tests/test_qa_fixes.py`:
+  - **RT-12** (HIGH): `event.*` guards now resolve against the triggering event's payload (e.g. `event.amount > 100`) instead of `None`. The event is threaded through `_evaluate_guard → _eval_guard → _eval_compare/_eval_nullcheck → _resolve_variable`.
+  - **RT-14** (MED): ordered comparisons (`< > <= >=`) fail **closed** on `None`/non-numeric operands instead of falling back to lexicographic string compare (which masked RT-12). Numeric-looking strings still coerce; `eq`/`ne` unchanged.
+  - **RT-06** (MED): a state's `on_entry` runs **before** its invoked child starts (XState order) instead of being dropped by an early return.
+  - **RT-07** (MED-HIGH): `resume()`/`restore()` rehydrate invoked child machines and `active_invoke`, so a machine that crashed inside an `invoke` state is no longer permanently wedged. Sibling defs must be re-registered before resume; a missing sibling is skipped with a `UserWarning`.
+- Full runtime-python suite: 116 passed.
+
+The npm packages (`@orcalang/orca-lang`, `@orcalang/orca-runtime-ts`, `@orcalang/orca-mcp-server`) are version-bumped to keep the release train in lockstep — no functional changes to them.
+
+---
+
 ## [v0.1.18] — 2026-03-30
 
 ### Added
