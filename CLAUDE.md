@@ -99,6 +99,22 @@ npx tsx src/index.ts compile xstate examples/payment-processor.orca.md
 npx tsx src/index.ts compile mermaid examples/text-adventure.orca.md
 ```
 
+## Release & Deployment
+
+Releases are **git-tag driven** + **changesets**, mostly automated via `.github/workflows/{ci,release}.yml`. The non-obvious parts (easy to get wrong — read before cutting a release):
+
+- **One shared version for the whole train.** `@orcalang/orca-lang`, `@orcalang/orca-runtime-ts`, `@orcalang/orca-mcp-server` are a changesets `fixed` group (`.changeset/config.json`); `runtime-python` (`pyproject.toml` **and** `orca_runtime_python/__init__.py __version__`), the `runtime-go` tag, and `server.json` are kept in lockstep. Every release is "bump **all** packages to vX.Y.Z". **Never** tag a single package's own `vX.Y.Z` — it collides with the next train bump.
+
+- **CI does the bump + tag** (`ci.yml` → `version` job, on `main`): auto-creates changesets for changed *npm* packages, runs `pnpm changeset version`, `sed`s `pyproject.toml` + `server.json` to match, commits `chore: bump all packages to vX.Y.Z`, and creates the `vX.Y.Z` tag.
+
+- **Python-/Go-only changes do NOT auto-release.** The version job's changeset step `continue`s for `runtime-python`/`runtime-go`, so a change touching only those yields no changeset → no bump → no tag. To release such a fix: **add a changeset bumping an npm package** (e.g. `"@orcalang/orca-lang": patch`) so the whole train (incl. pyproject/server.json) bumps, and **hand-bump `runtime-python/orca_runtime_python/__init__.py __version__`** (CI only `sed`s `pyproject.toml`). Root `CHANGELOG.md` is maintained by hand (used for the GitHub Release notes).
+
+- **The CI-pushed tag does NOT trigger `release.yml`.** CI pushes the tag with `GITHUB_TOKEN`, which by design cannot trigger another workflow. After CI tags `vX.Y.Z`, **re-push the tag under a real account** to fire the release: `git push origin :refs/tags/vX.Y.Z && git push origin vX.Y.Z`.
+
+- **What `release.yml` (`on: push: tags: v*`) publishes:** npm × 3 (`NPM_TOKEN`), PyPI `orca-runtime-python` (`PYPI_TOKEN`), the Go module (just force-pushes `packages/runtime-go/vX.Y.Z` — proxy.golang.org serves it from the tag, **no token**), MCP Registry, and a GitHub Release. Jobs are idempotent (skip if the version already exists), so re-running is safe.
+
+- **npm publishing is currently broken** (as of 2026-06): `NPM_TOKEN` is invalid/expired → `Publish` fails with **`E404` on `PUT`** and npm `latest` is stuck at **0.1.27** (0.1.28/0.1.29 published to PyPI + Go but never npm). An E404 on npm publish means the **token**, not the code. Fix is maintainer-only: rotate the `NPM_TOKEN` repo secret, then `gh run rerun <release-run-id> --failed` (re-runs npm + mcp-server + MCP-registry + GitHub-Release jobs).
+
 ## Package Details
 
 ### packages/orca-lang (core)
