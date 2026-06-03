@@ -1,6 +1,6 @@
 {
   "name": "@orcalang/orca-runtime-ts",
-  "version": "0.1.29",
+  "version": "0.1.30",
   "description": "TypeScript async runtime for Orca state machines",
   "repository": {
     "type": "git",
