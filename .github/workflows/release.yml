@@ -28,7 +28,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url on purpose: with it, setup-node writes an .npmrc and
+          # exports a dummy NODE_AUTH_TOKEN that pnpm sends as the bearer token
+          # instead of doing the OIDC exchange — npm masks that as a 404.
 
       - uses: pnpm/action-setup@v4
         with:
@@ -66,7 +68,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url on purpose: with it, setup-node writes an .npmrc and
+          # exports a dummy NODE_AUTH_TOKEN that pnpm sends as the bearer token
+          # instead of doing the OIDC exchange — npm masks that as a 404.
 
       - uses: pnpm/action-setup@v4
         with:
@@ -105,7 +109,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url on purpose: with it, setup-node writes an .npmrc and
+          # exports a dummy NODE_AUTH_TOKEN that pnpm sends as the bearer token
+          # instead of doing the OIDC exchange — npm masks that as a 404.
 
       - uses: pnpm/action-setup@v4
         with:
