@@ -18,7 +18,9 @@ jobs:
     name: Publish orca (npm)
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    # OIDC trusted publishing — no NPM_TOKEN; npm verifies the GitHub Actions identity
+    # Publishing via NPM_TOKEN for now: pnpm 10.33 does not engage npm OIDC (it
+    # publishes unauthenticated -> 404). OIDC groundwork is kept (id-token below,
+    # repository fields). Revisit the OIDC switchover ~2026-08 when pnpm is fixed.
     permissions:
       contents: read
       id-token: write
@@ -28,8 +30,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # registry-url writes the .npmrc that makes pnpm attempt OIDC for npmjs.
-          # It also exports a dummy NODE_AUTH_TOKEN, which the Publish step unsets.
           registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v4
@@ -45,9 +45,6 @@ jobs:
 
       - name: Publish
         run: |
-          # setup-node exports a dummy NODE_AUTH_TOKEN; unset it so the .npmrc's
-          # `_authToken=${NODE_AUTH_TOKEN}` stays unresolved and pnpm uses OIDC.
-          unset NODE_AUTH_TOKEN
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
@@ -56,6 +53,8 @@ jobs:
             pnpm publish --access public --no-git-checks
           fi
         working-directory: packages/orca-lang
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── npm: @orca-lang/orca-runtime-ts ─────────────────────────────────────────
   publish-npm-runtime-ts:
@@ -71,8 +70,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # registry-url writes the .npmrc that makes pnpm attempt OIDC for npmjs.
-          # It also exports a dummy NODE_AUTH_TOKEN, which the Publish step unsets.
           registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v4
@@ -88,9 +85,6 @@ jobs:
 
       - name: Publish
         run: |
-          # setup-node exports a dummy NODE_AUTH_TOKEN; unset it so the .npmrc's
-          # `_authToken=${NODE_AUTH_TOKEN}` stays unresolved and pnpm uses OIDC.
-          unset NODE_AUTH_TOKEN
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
@@ -99,6 +93,8 @@ jobs:
             pnpm publish --access public --no-git-checks
           fi
         working-directory: packages/runtime-ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── npm: @orca-lang/orca-mcp-server ─────────────────────────────────────────
   publish-npm-mcp-server:
@@ -115,8 +111,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # registry-url writes the .npmrc that makes pnpm attempt OIDC for npmjs.
-          # It also exports a dummy NODE_AUTH_TOKEN, which the Publish step unsets.
           registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v4
@@ -136,9 +130,6 @@ jobs:
 
       - name: Publish
         run: |
-          # setup-node exports a dummy NODE_AUTH_TOKEN; unset it so the .npmrc's
-          # `_authToken=${NODE_AUTH_TOKEN}` stays unresolved and pnpm uses OIDC.
-          unset NODE_AUTH_TOKEN
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
@@ -147,6 +138,8 @@ jobs:
             # Publish from monorepo root so pnpm can rewrite workspace:* to actual versions
             pnpm publish --filter @orcalang/orca-mcp-server --access public --no-git-checks
           fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── PyPI: orca-runtime-python ────────────────────────────────────────────────
   publish-pypi:
@@ -226,7 +219,7 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish
+        run: ./mcp-publisher publish --npm-token=${{ secrets.NPM_TOKEN }}
 
   # ── GitHub Release notes ─────────────────────────────────────────────────────
   create-release:
