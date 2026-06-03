@@ -2,6 +2,11 @@
   "name": "@orcalang/orca-lang",
   "version": "0.1.29",
   "description": "Orca (Orchestrated State Machine Language) - an LLM-native code generation target",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jascal/orca-lang.git",
+    "directory": "packages/orca-lang"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

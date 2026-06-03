@@ -6,6 +6,16 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [v0.1.30] — 2026-06-02
+
+### Changed
+
+- **CI / release**: npm publishing for `@orcalang/orca-lang`, `@orcalang/orca-runtime-ts`, and `@orcalang/orca-mcp-server` migrated from a long-lived `NPM_TOKEN` to **OIDC trusted publishing**. There is no stored npm credential anymore, and publishes now carry provenance attestations. `release.yml` gains `id-token: write` on the three npm jobs, pins `pnpm/action-setup` to `10.33.0` (OIDC publish support requires pnpm ≥ 10.18), and drops `NODE_AUTH_TOKEN`. The MCP-registry publish is token-less as well (npm ownership is verified via the published `mcpName` field). Added a `repository` field to the three npm `package.json` files, required for provenance.
+
+No functional or library changes — the train is version-bumped to stay in lockstep.
+
+---
+
 ## [v0.1.29] — 2026-06-02
 
 ### Fixed

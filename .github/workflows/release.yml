@@ -18,6 +18,10 @@ jobs:
     name: Publish orca (npm)
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    # OIDC trusted publishing — no NPM_TOKEN; npm verifies the GitHub Actions identity
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +32,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.33.0  # >= 10.18 required for pnpm OIDC trusted publishing (paired with id-token: write above)
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -47,14 +51,15 @@ jobs:
             pnpm publish --access public --no-git-checks
           fi
         working-directory: packages/orca-lang
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── npm: @orca-lang/orca-runtime-ts ─────────────────────────────────────────
   publish-npm-runtime-ts:
     name: Publish @orca-lang/orca-runtime-ts (npm)
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -65,7 +70,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.33.0  # >= 10.18 required for pnpm OIDC trusted publishing (paired with id-token: write above)
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -84,8 +89,6 @@ jobs:
             pnpm publish --access public --no-git-checks
           fi
         working-directory: packages/runtime-ts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── npm: @orca-lang/orca-mcp-server ─────────────────────────────────────────
   publish-npm-mcp-server:
@@ -93,6 +96,9 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     needs: publish-npm-orca
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -103,7 +109,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10.33.0  # >= 10.18 required for pnpm OIDC trusted publishing (paired with id-token: write above)
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -126,8 +132,6 @@ jobs:
             # Publish from monorepo root so pnpm can rewrite workspace:* to actual versions
             pnpm publish --filter @orcalang/orca-mcp-server --access public --no-git-checks
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── PyPI: orca-runtime-python ────────────────────────────────────────────────
   publish-pypi:
@@ -207,7 +211,7 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish --npm-token=${{ secrets.NPM_TOKEN }}
+        run: ./mcp-publisher publish
 
   # ── GitHub Release notes ─────────────────────────────────────────────────────
   create-release:
