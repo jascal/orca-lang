@@ -32,7 +32,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.33.0  # >= 10.18 required for pnpm OIDC trusted publishing (paired with id-token: write above)
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -70,7 +70,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.33.0  # >= 10.18 required for pnpm OIDC trusted publishing (paired with id-token: write above)
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -109,7 +109,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 10.33.0  # >= 10.18 required for pnpm OIDC trusted publishing (paired with id-token: write above)
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
