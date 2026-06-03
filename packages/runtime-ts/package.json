@@ -2,6 +2,11 @@
   "name": "@orcalang/orca-runtime-ts",
   "version": "0.1.29",
   "description": "TypeScript async runtime for Orca state machines",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jascal/orca-lang.git",
+    "directory": "packages/runtime-ts"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
