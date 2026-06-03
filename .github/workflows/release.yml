@@ -28,9 +28,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # No registry-url on purpose: with it, setup-node writes an .npmrc and
-          # exports a dummy NODE_AUTH_TOKEN that pnpm sends as the bearer token
-          # instead of doing the OIDC exchange — npm masks that as a 404.
+          # registry-url writes the .npmrc that makes pnpm attempt OIDC for npmjs.
+          # It also exports a dummy NODE_AUTH_TOKEN, which the Publish step unsets.
+          registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v4
         with:
@@ -45,6 +45,9 @@ jobs:
 
       - name: Publish
         run: |
+          # setup-node exports a dummy NODE_AUTH_TOKEN; unset it so the .npmrc's
+          # `_authToken=${NODE_AUTH_TOKEN}` stays unresolved and pnpm uses OIDC.
+          unset NODE_AUTH_TOKEN
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
@@ -68,9 +71,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # No registry-url on purpose: with it, setup-node writes an .npmrc and
-          # exports a dummy NODE_AUTH_TOKEN that pnpm sends as the bearer token
-          # instead of doing the OIDC exchange — npm masks that as a 404.
+          # registry-url writes the .npmrc that makes pnpm attempt OIDC for npmjs.
+          # It also exports a dummy NODE_AUTH_TOKEN, which the Publish step unsets.
+          registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v4
         with:
@@ -85,6 +88,9 @@ jobs:
 
       - name: Publish
         run: |
+          # setup-node exports a dummy NODE_AUTH_TOKEN; unset it so the .npmrc's
+          # `_authToken=${NODE_AUTH_TOKEN}` stays unresolved and pnpm uses OIDC.
+          unset NODE_AUTH_TOKEN
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
@@ -109,9 +115,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # No registry-url on purpose: with it, setup-node writes an .npmrc and
-          # exports a dummy NODE_AUTH_TOKEN that pnpm sends as the bearer token
-          # instead of doing the OIDC exchange — npm masks that as a 404.
+          # registry-url writes the .npmrc that makes pnpm attempt OIDC for npmjs.
+          # It also exports a dummy NODE_AUTH_TOKEN, which the Publish step unsets.
+          registry-url: 'https://registry.npmjs.org'
 
       - uses: pnpm/action-setup@v4
         with:
@@ -130,6 +136,9 @@ jobs:
 
       - name: Publish
         run: |
+          # setup-node exports a dummy NODE_AUTH_TOKEN; unset it so the .npmrc's
+          # `_authToken=${NODE_AUTH_TOKEN}` stays unresolved and pnpm uses OIDC.
+          unset NODE_AUTH_TOKEN
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")
           if npm view "${PKG}@${VER}" >/dev/null 2>&1; then
